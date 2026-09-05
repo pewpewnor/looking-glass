@@ -4,8 +4,9 @@ This directory contains the Flutter client for Looking Glass. The client
 creates object categories from reference photos, captures query scenes, and
 displays the result returned by the Go backend.
 
-The backend and model-development documentation are linked from the
-[repository README](../README.md).
+The complete application setup and runtime guide is in
+[`../APPLICATION.md`](../APPLICATION.md). Model-development documentation is
+in [`../MODEL_DEVELOPMENT.md`](../MODEL_DEVELOPMENT.md).
 
 ## App layout
 

@@ -2,7 +2,7 @@
 
 This guide covers the local setup for dataset preparation, training, export,
 and evaluation. The complete model design and training contract live in
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
+[`MODELS_ARCHITECTURE.md`](MODELS_ARCHITECTURE.md).
 
 ## Quick start
 
@@ -45,6 +45,6 @@ training and evaluation workflow. Checkpoints are written under the ignored
 - [InsDet](https://insdet.github.io) provides instance-detection training and
   test data.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for stage-by-stage configuration,
+See [`MODELS_ARCHITECTURE.md`](MODELS_ARCHITECTURE.md) for stage-by-stage configuration,
 augmentation rules, checkpoint durability, inference modes, and success
 criteria.
