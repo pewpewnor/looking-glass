@@ -1,0 +1,21 @@
+# Local runtime dependencies and model assets
+onnxruntime*/
+models/
+backend/data/
+apk/
+
+# Python development artifacts
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Local tooling and generated output
+.idea/
+.claude/
+dataset/
+checkpoints/
+exports/
+inference/
+*.backup
+*.log
