@@ -1,0 +1,25 @@
+{
+  "server": {
+    "port": 8080
+  },
+  "models": {
+    "rmbg_path":      "../models/rmbg.onnx",
+    "siamese_path":   "../models/siamese.onnx",
+    "localizer_path": "../models/localizer.onnx"
+  },
+  "thresholds": {
+    "siamese_existence":  0.4597,
+    "localizer_abstain":  0.5
+  },
+  "data_dir":        "./data",
+  "ort_lib_path":    "",
+  "timing_log_path": "pipeline_timing.log",
+  "cuda": {
+    "enabled":   true,
+    "device_id": 0
+  },
+  "localizer": {
+    "python_path":  "python3.14",
+    "script_path":  "./scripts/localizer_worker.py"
+  }
+}

@@ -1,0 +1,10 @@
+onnxruntime*/
+
+.idea/
+
+models/
+
+backend/data/
+apk/
+
+*.log
