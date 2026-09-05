@@ -1,18 +1,3 @@
-"""Aggregate raw datasets into a clean staging directory + manifest.
-
-Output layout:
-    dataset/aggregated/
-    ├── manifest.json
-    ├── stats.json
-    ├── train/{support,query}/<inst_id>/<NNN>.{png,jpg}
-    └── test/{support,query}/<inst_id>/<NNN>.{png,jpg}
-
-Changes:
-    * Uses rembg + ISNet for foreground extraction
-    * Very tight support crops
-    * Tiny edge padding
-    * Offline after first rembg model download
-"""
 
 from __future__ import annotations
 
@@ -28,10 +13,6 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
 SCHEMA_VERSION = 6
 
 SEED = 42
@@ -39,10 +20,8 @@ TRAIN_RATIO = 0.80
 
 N_SUPPORT_MIN = 4
 
-# Small bbox padding for generic bbox extraction
 BBOX_PAD_FRAC = 0.01
 
-# VERY tight crop padding for saved support images
 SUPPORT_CROP_PAD_FRAC = 0.005
 
 BBOX_MIN_SIDE = 20
@@ -65,13 +44,7 @@ INSDET_DIR = BASE_DIR / "InsDet"
 
 _RMBG_SINGLETON: "RMBGCropper | None" = None
 
-# ---------------------------------------------------------------------------
-# Bbox utilities
-# ---------------------------------------------------------------------------
-
-
 def _largest_component_bbox(mask: np.ndarray) -> list[int] | None:
-    """Return tight bbox around largest connected component."""
 
     if not mask.any():
         return None
@@ -97,7 +70,6 @@ def _largest_component_bbox(mask: np.ndarray) -> list[int] | None:
 
     return [x1, y1, x2, y2]
 
-
 def _pad_bbox(
     bbox: list[int],
     img_size: tuple[int, int],
@@ -120,7 +92,6 @@ def _pad_bbox(
         min(h, y2 + py),
     ]
 
-
 def _bbox_valid(
     bbox: list[int],
     img_size: tuple[int, int],
@@ -134,7 +105,6 @@ def _bbox_valid(
         return False
 
     return (bw * bh) / (w * h) >= BBOX_MIN_AREA_FRAC
-
 
 def _bbox_from_mask(mask_path: Path) -> list[int] | None:
     arr = (
@@ -158,7 +128,6 @@ def _bbox_from_mask(mask_path: Path) -> list[int] | None:
     )
 
     return bb if _bbox_valid(bb, (w, h)) else None
-
 
 def _bbox_from_image(
     img_path: Path,
@@ -185,12 +154,6 @@ def _bbox_from_image(
 
     return bb if _bbox_valid(bb, (w, h)) else None
 
-
-# ---------------------------------------------------------------------------
-# XML utilities
-# ---------------------------------------------------------------------------
-
-
 def _int_child(el: ET.Element, tag: str) -> int | None:
     child = el.find(tag)
 
@@ -201,7 +164,6 @@ def _int_child(el: ET.Element, tag: str) -> int | None:
         return int(float(child.text))
     except ValueError:
         return None
-
 
 def _parse_voc_xml(xml_path: Path) -> list[dict]:
     root = ET.parse(xml_path).getroot()
@@ -235,15 +197,8 @@ def _parse_voc_xml(xml_path: Path) -> list[dict]:
 
     return out
 
-
 def _normalize_name(name: str) -> str:
     return name.strip().lower().replace(" ", "_").replace("-", "_")
-
-
-# ---------------------------------------------------------------------------
-# Dataset collectors
-# ---------------------------------------------------------------------------
-
 
 def collect_hots_instances() -> list[dict]:
     train_dir = HOTS_OBJECT_DIR / "train"
@@ -302,7 +257,6 @@ def collect_hots_instances() -> list[dict]:
 
     return out
 
-
 def collect_insdet_instances() -> list[dict]:
     objects_dir = INSDET_DIR / "Objects"
 
@@ -358,12 +312,6 @@ def collect_insdet_instances() -> list[dict]:
 
     return out
 
-
-# ---------------------------------------------------------------------------
-# Scene queries
-# ---------------------------------------------------------------------------
-
-
 def collect_hots_scene_queries() -> list[dict]:
     annot_dir = HOTS_SCENE_DIR / "ObjectDetection" / "Annotations"
     rgb_dir = HOTS_SCENE_DIR / "RGB"
@@ -390,7 +338,6 @@ def collect_hots_scene_queries() -> list[dict]:
             )
 
     return out
-
 
 def collect_insdet_scene_queries() -> list[dict]:
     scenes_root = INSDET_DIR / "Scenes"
@@ -425,12 +372,6 @@ def collect_insdet_scene_queries() -> list[dict]:
 
     return out
 
-
-# ---------------------------------------------------------------------------
-# Query attachment
-# ---------------------------------------------------------------------------
-
-
 def attach_scene_queries(
     instances: list[dict],
     scene_queries: list[dict],
@@ -463,17 +404,10 @@ def attach_scene_queries(
 
     return out
 
-
 def filter_empty_query_instances(
     instances: list[dict],
 ) -> list[dict]:
     return [i for i in instances if i["query_images"]]
-
-
-# ---------------------------------------------------------------------------
-# Split
-# ---------------------------------------------------------------------------
-
 
 def split_train_test(
     instances: list[dict],
@@ -514,14 +448,7 @@ def split_train_test(
 
     return train, test
 
-
-# ---------------------------------------------------------------------------
-# rembg cropper
-# ---------------------------------------------------------------------------
-
-
 class RMBGCropper:
-    """Ultra tight rembg foreground cropper."""
 
     def __init__(
         self,
@@ -567,7 +494,6 @@ class RMBGCropper:
 
         return _largest_component_bbox(mask)
 
-
 def _get_rmbg() -> "RMBGCropper | None":
     global _RMBG_SINGLETON
 
@@ -586,12 +512,6 @@ def _get_rmbg() -> "RMBGCropper | None":
         _RMBG_SINGLETON = None
 
     return _RMBG_SINGLETON
-
-
-# ---------------------------------------------------------------------------
-# Cropping
-# ---------------------------------------------------------------------------
-
 
 def _crop_support_to_disk(
     src_path: Path,
@@ -624,7 +544,6 @@ def _crop_support_to_disk(
     bw = max(1, x2 - x1)
     bh = max(1, y2 - y1)
 
-    # Tiny edge padding
     px = max(1, int(round(bw * pad_frac)))
     py = max(1, int(round(bh * pad_frac)))
 
@@ -642,12 +561,6 @@ def _crop_support_to_disk(
     )
 
     return cropped.size
-
-
-# ---------------------------------------------------------------------------
-# Stage images
-# ---------------------------------------------------------------------------
-
 
 def stage_images(
     splits: dict[str, list[dict]],
@@ -708,12 +621,6 @@ def stage_images(
         f"staged {n_copied} images " f"({n_cropped} cropped)",
     )
 
-
-# ---------------------------------------------------------------------------
-# Manifest
-# ---------------------------------------------------------------------------
-
-
 def write_manifest(
     splits: dict[str, list[dict]],
 ) -> None:
@@ -746,7 +653,6 @@ def write_manifest(
 
     print("manifest written")
 
-
 def write_stats(
     splits: dict[str, list[dict]],
 ) -> None:
@@ -768,12 +674,6 @@ def write_stats(
         json.dump(stats, f, indent=2)
 
     print(json.dumps(stats, indent=2))
-
-
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
 
 def validate() -> bool:
     manifest_path = OUT_DIR / "manifest.json"
@@ -799,12 +699,6 @@ def validate() -> bool:
     print(f"validation complete: {n_bad} bad")
 
     return n_bad == 0
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 
 def main(force: bool = False) -> None:
     if OUT_DIR.exists() and not force:
@@ -859,7 +753,6 @@ def main(force: bool = False) -> None:
         sys.exit(1)
 
     print("done")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -17,19 +17,17 @@ class FindObjectPage extends StatefulWidget {
 }
 
 class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObserver {
-  // Category
+
   List<String> _categories = [];
   String? _selectedCategory;
   bool _loadingCategories = false;
   String? _categoryError;
 
-  // Camera
   List<CameraDescription>? _cameras;
   CameraController? _cameraController;
   bool _cameraReady = false;
   String? _cameraError;
 
-  // Query
   bool _querying = false;
   String? _queryError;
   bool _notFound = false;
@@ -218,8 +216,6 @@ class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObse
     );
   }
 
-  // ─── build ────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -244,14 +240,12 @@ class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObse
               _categoryError!,
               onDismiss: () => setState(() => _categoryError = null),
             ),
-          // Camera area + overlaid controls occupy all remaining space
+
           Expanded(child: _buildCameraWithControls()),
         ],
       ),
     );
   }
-
-  // ─── camera + overlaid bottom controls ───────────────────────────────────
 
   Widget _buildCameraWithControls() {
     if (_cameraError != null) {
@@ -283,15 +277,12 @@ class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObse
       );
     }
 
-    // Camera preview stretches to cover the entire area; capture button and
-    // status cards sit on top via Positioned overlay.
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ── Camera preview (cover-fit to fill without black bars) ──────────
+
         _buildCameraPreview(),
 
-        // ── Busy overlay ───────────────────────────────────────────────────
         if (_querying)
           const ColoredBox(
             color: Colors.black54,
@@ -308,7 +299,6 @@ class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObse
             ),
           ),
 
-        // ── Bottom overlay: status + capture button ─────────────────────────
         Positioned(
           left: 0,
           right: 0,
@@ -333,14 +323,12 @@ class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObse
     );
   }
 
-  /// Camera preview that covers (crops) the available space so there are
-  /// no black bars regardless of screen vs sensor aspect ratio.
   Widget _buildCameraPreview() {
     return LayoutBuilder(
       builder: (context, constraints) {
         final ctrl = _cameraController!;
-        // camera aspect ratio: width / height in landscape sensor coords
-        final sensorRatio = ctrl.value.aspectRatio; // > 1 for landscape sensor
+
+        final sensorRatio = ctrl.value.aspectRatio;
         final screenW = constraints.maxWidth;
         final screenH = constraints.maxHeight;
 
@@ -371,8 +359,6 @@ class _FindObjectPageState extends State<FindObjectPage> with WidgetsBindingObse
       },
     );
   }
-
-  // ─── sub-widgets ─────────────────────────────────────────────────────────
 
   Widget _buildCategorySelector() {
     return Container(

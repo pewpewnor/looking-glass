@@ -1,27 +1,3 @@
-"""Localizer training orchestrator.
-
-Public entry points:
-    train_stage_L1(...)
-    train_stage_L2(...)
-    train_stage_L3(...)
-    evaluate_phase0(...)
-    evaluate_run(checkpoint=..., ...)
-
-Stage curriculum (NEW):
-    Each stage can run in 1..N sub-phases, each with its own source filter and
-    epoch count. Configure via cfg keys like:
-        "L2_curriculum": ["insdet", "hots", "mixed"]
-        "L2_epochs_insdet": 4
-        "L2_epochs_hots":   3
-        "L2_epochs_mixed":  5
-
-    Backwards-compat: if ``L2_curriculum`` is absent (or empty), we fall back
-    to a single ``mixed`` phase with ``L2_epochs`` epochs (the old behaviour).
-
-L1 trains positives only (fusion warm-up). L2/L3 mix in negatives so the
-abstain channel learns. Set ``L<N>_neg_prob`` in cfg to override the default
-per-stage neg rate.
-"""
 
 from __future__ import annotations
 
@@ -51,36 +27,28 @@ from model_shared.folds import stratified_kfold
 from model_shared.logging import print_aggregate, print_epoch_log
 from model_shared.runtime import gpu_cleanup_on_exit, release_gpu_memory
 
-
 MODEL_KIND = "localizer"
 
-
-# ---------------------------------------------------------------------------
-# Default config
-# ---------------------------------------------------------------------------
-
 DEFAULT_CFG: dict[str, Any] = {
-    # I/O
+
     "manifest": "dataset/aggregated/manifest.json",
     "data_root": None,
     "out_root": "checkpoints",
     "analysis_root": "model_analysis",
-    # Hardware
+
     "img_size": 768,
     "batch_size": 1,
     "grad_accum_steps": 8,
     "num_workers": 2,
     "use_amp": True,
     "device": None,
-    # Folds
+
     "folds": 3,
     "fold_seed": 42,
-    # K range
+
     "k_min": 1,
     "k_max": 10,
-    # ──────────────────────────────────────────────────────────────────
-    # Stage role + sizing (REBALANCED).
-    #
+
     #   L1  fusion-only warm-up. Frozen OWLv2, no LoRA. The fusion +
     #       support-attn-pool learns to "do no harm" via patch-CE.
     #       Positive-only — abstain channel has nothing to learn yet.
@@ -94,7 +62,7 @@ DEFAULT_CFG: dict[str, Any] = {
     #       fusion/head LRs ~5× from L2 (they're already converged from
     #       the L2 warm-up); LoRA gets a fresh-init LR. This is where
     #       real mAP gains come from. Longest stage.
-    # ──────────────────────────────────────────────────────────────────
+
     "L1_epochs": 4,
     "L2_epochs": 4,
     "L3_epochs": 12,
@@ -108,7 +76,7 @@ DEFAULT_CFG: dict[str, Any] = {
     "L1_curriculum": ["insdet", "hots", "mixed"],
     "L2_curriculum": ["insdet", "hots", "mixed"],
     "L3_curriculum": ["insdet", "hots", "mixed"],
-    # L1: short, evenly across phases.
+
     "L1_epochs_insdet": 1,
     "L1_epochs_hots":   1,
     "L1_epochs_mixed":  2,
@@ -126,8 +94,7 @@ DEFAULT_CFG: dict[str, Any] = {
     "L1_neg_prob": 0.0,
     "L2_neg_prob": 0.25,
     "L3_neg_prob": 0.30,
-    # LRs (REBALANCED).
-    #
+
     # L1 fusion gets a moderately-high LR (only ~3M params + frozen backbone).
     # L2 heads + fusion get the *biggest* LRs in the schedule — this is a
     # short warm-up so we want fast convergence of the new heads against the
@@ -141,11 +108,11 @@ DEFAULT_CFG: dict[str, Any] = {
     "lr_class_L3":  2e-5,
     "lr_box_L3":    2e-5,
     "lr_lora_L3":   2e-4,
-    # Optim
+
     "weight_decay": 1e-4,
     "grad_clip": 1.0,
     "warmup_frac": 0.05,
-    # Loss
+
     "lambda_patch_ce": 1.0,
     "lambda_l1": 2.0,
     "lambda_giou": 4.0,
@@ -156,19 +123,19 @@ DEFAULT_CFG: dict[str, Any] = {
     # L2 is itself a warm-up, so we no longer freeze the box head for the
     # first N epochs of it. Set to 0 to disable; >0 to re-enable.
     "L2_box_warmup_epochs": 0,
-    # Architecture
+
     "fusion_layers": 2,
     "fusion_heads": 8,
     "fusion_mlp_ratio": 2,
     "fusion_dropout": 0.0,
     "owlv2_model_name": "google/owlv2-base-patch16-ensemble",
-    # LoRA
+
     "lora_r": 8,
     "lora_alpha": 16,
     "lora_dropout": 0.1,
     "lora_last_n_layers": 4,
     "lora_target_modules": ("q_proj", "v_proj"),
-    # Augmentation
+
     "aug_color_jitter": 0.4,
     "aug_hue": 0.1,
     "aug_grayscale_prob": 0.2,
@@ -179,18 +146,17 @@ DEFAULT_CFG: dict[str, Any] = {
     "aug_rrc_scale": (0.5, 1.0),
     "aug_hflip_prob": 0.5,
     "aug_query_color_jitter": 0.2,
-    # Early stopping
+
     "L1_early_stop_patience": 4,
     "L2_early_stop_patience": 4,
     "L3_early_stop_patience": 4,
-    # Eval
+
     "abstain_threshold": 0.5,
-    # Misc
+
     "seed": 42,
     "keep_last_n": 0,
     "smoke": False,
 }
-
 
 SMOKE_OVERRIDES: dict[str, Any] = {
     "img_size": 224,
@@ -223,12 +189,6 @@ SMOKE_OVERRIDES: dict[str, Any] = {
     "L3_epochs_mixed": 1,
 }
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _set_seed(seed: int) -> None:
     _random.seed(seed)
     np.random.seed(seed)
@@ -236,13 +196,11 @@ def _set_seed(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-
 def _resolve_device(cfg: dict) -> torch.device:
     dev = cfg.get("device")
     if dev is None:
         dev = "cuda" if torch.cuda.is_available() else "cpu"
     return torch.device(dev)
-
 
 def _merge_cfg(user_kwargs: dict) -> dict:
     cfg = dict(DEFAULT_CFG)
@@ -251,7 +209,6 @@ def _merge_cfg(user_kwargs: dict) -> dict:
         cfg.update(SMOKE_OVERRIDES)
         cfg.update(user_kwargs or {})
     return cfg
-
 
 def _stage_lrs(stage: str, cfg: dict) -> dict:
     out = dict(cfg)
@@ -264,7 +221,6 @@ def _stage_lrs(stage: str, cfg: dict) -> dict:
             out.setdefault(f"lr_{k}", 0.0)
     return out
 
-
 def _stage_dirs(cfg: dict, stage: str) -> tuple[Path, Path]:
     out_dir = Path(cfg["out_root"]) / MODEL_KIND / stage
     analysis_dir = Path(cfg["analysis_root"]) / MODEL_KIND / stage
@@ -272,12 +228,10 @@ def _stage_dirs(cfg: dict, stage: str) -> tuple[Path, Path]:
     analysis_dir.mkdir(parents=True, exist_ok=True)
     return out_dir, analysis_dir
 
-
 def _make_scaler(use_amp: bool, device: torch.device):
     if use_amp and device.type == "cuda":
         return torch.amp.GradScaler("cuda")
     return None
-
 
 def _build_model(cfg: dict, *, lora_active: bool = False) -> MultiShotLocalizer:
     m = MultiShotLocalizer(
@@ -297,7 +251,6 @@ def _build_model(cfg: dict, *, lora_active: bool = False) -> MultiShotLocalizer:
         )
     return m
 
-
 def _augmentation_kwargs(cfg: dict) -> dict[str, Any]:
     return dict(
         aug_color_jitter=cfg["aug_color_jitter"],
@@ -311,7 +264,6 @@ def _augmentation_kwargs(cfg: dict) -> dict[str, Any]:
         aug_hflip_prob=cfg["aug_hflip_prob"],
         aug_query_color_jitter=cfg["aug_query_color_jitter"],
     )
-
 
 def _save_stage_ckpt(
     *,
@@ -368,12 +320,6 @@ def _save_stage_ckpt(
         atomic_save(payload, extra_path, label=extra_path.stem)
     return out_dir / "last.pt"
 
-
-# ---------------------------------------------------------------------------
-# Phase 0 — zero-shot OWLv2 baseline
-# ---------------------------------------------------------------------------
-
-
 _TRAIN_PRIORITY = ("loss", "patch_ce", "l1", "giou", "log_area", "grad_norm",
                    "alpha", "bg_bias", "n_steps")
 _VAL_PRIORITY = (
@@ -398,7 +344,6 @@ _PER_SOURCE_KEYS = (
     "abstain_rate_pos", "abstain_rate_neg", "score_iou_correlation",
 )
 
-
 def evaluate_phase0(**user_kwargs) -> dict:
     try:
         with gpu_cleanup_on_exit():
@@ -406,32 +351,17 @@ def evaluate_phase0(**user_kwargs) -> dict:
     finally:
         release_gpu_memory(verbose=False)
 
-
 def evaluate_phase0_final_style(**user_kwargs) -> dict:
-    """Phase 0 baseline evaluated under the same loader regime as the final
-    (L3) eval: full K range and mixed positives + negatives at
-    ``cfg['L3_neg_prob']``. Lets abstain / FP-rate / TN-rate / score-IoU
-    metrics be compared apples-to-apples against the trained pipeline.
-    """
     try:
         with gpu_cleanup_on_exit():
             return _evaluate_phase0_final_style_inner(user_kwargs)
     finally:
         release_gpu_memory(verbose=False)
 
-
 def train_phase0(**user_kwargs) -> dict:
-    """Alias for evaluate_phase0 — no training happens at Phase 0."""
     return evaluate_phase0(**user_kwargs)
 
-
 def _evaluate_phase0_inner(user_kwargs: dict) -> dict:
-    """Phase 0 = ONE-SHOT vanilla OWLv2 baseline (no fusion, no fine-tuning).
-
-    Uses the first valid support per episode and runs the bare OWLv2
-    image-guided detection path. This is the numerical floor the trained
-    L1/L2/L3 stages must beat.
-    """
     cfg = _merge_cfg(user_kwargs)
     device = _resolve_device(cfg)
     out_dir, analysis_dir = _stage_dirs(cfg, "phase0")
@@ -471,16 +401,7 @@ def _evaluate_phase0_inner(user_kwargs: dict) -> dict:
     )
     return metrics
 
-
 def _evaluate_phase0_final_style_inner(user_kwargs: dict) -> dict:
-    """Phase 0 baseline under the L3 eval loader regime (mixed pos+neg, full K).
-
-    Same model as ``_evaluate_phase0_inner`` (vanilla OWLv2, no fusion / LoRA /
-    trained heads) but mirrors the loader of ``_evaluate_run_inner`` for L3:
-    ``neg_prob = cfg['L3_neg_prob']`` (default 0.30) and full
-    ``k_min..k_max``. Saved under ``phase0/test_eval_final_style.json`` so the
-    existing one-shot positive-only baseline is preserved.
-    """
     cfg = _merge_cfg(user_kwargs)
     device = _resolve_device(cfg)
     out_dir, analysis_dir = _stage_dirs(cfg, "phase0")
@@ -536,25 +457,13 @@ def _evaluate_phase0_final_style_inner(user_kwargs: dict) -> dict:
     )
     return metrics
 
-
-# ---------------------------------------------------------------------------
-# Stage runner (L1 / L2 / L3) with curriculum
-# ---------------------------------------------------------------------------
-
-
 _PHASE_TO_SOURCES: dict[str, list[str] | None] = {
     "insdet": ["insdet"],
     "hots":   ["hots"],
     "mixed":  None,
 }
 
-
 def _resolve_curriculum(stage: str, cfg: dict) -> list[tuple[str, int]]:
-    """Return [(phase_name, n_epochs), ...] for ``stage``.
-
-    Backwards-compat: if cfg[stage_curriculum] is empty / missing, we run a
-    single ``mixed`` phase with cfg[stage_epochs] epochs.
-    """
     curr = list(cfg.get(f"{stage}_curriculum", []) or [])
     if not curr:
         n = int(cfg.get(f"{stage}_epochs", 1))
@@ -571,7 +480,6 @@ def _resolve_curriculum(stage: str, cfg: dict) -> list[tuple[str, int]]:
         return [("mixed", n)]
     return out
 
-
 def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     cfg = _merge_cfg(user_kwargs)
     cfg = _stage_lrs(stage, cfg)
@@ -587,7 +495,6 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     lora_active = (stage == "L3")
     model = _build_model(cfg, lora_active=lora_active).to(device)
 
-    # --- resume / warm-start --------------------------------------------
     resume = user_kwargs.get("resume", True)
     resume_path = resolve_resume_path(resume, out_dir)
     if resume_path is None:
@@ -618,8 +525,7 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     )
     scaler = _make_scaler(bool(cfg["use_amp"]), device)
 
-    # --- restore optimiser if mid-stage ---------------------------------
-    resume_global_epoch = 1   # epoch index running across all phases (1-based)
+    resume_global_epoch = 1
     best_metric: dict[str, Any] = {"value": -1.0, "epoch": 0, "fold": 0, "phase": ""}
     early_stop_counter = 0
     metrics_history: list[dict] = []
@@ -649,10 +555,9 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
                 metrics_history = list(ckpt_full.get("metrics_history") or [])
                 print(f"  restored optim+sched at epoch={saved_epoch} fold={saved_fold}; "
                       f"continuing from epoch={resume_global_epoch} fold={resume_fold}")
-            except Exception as e:                                                 # noqa: BLE001
+            except Exception as e:
                 print(f"  warning: failed to restore optimizer/scheduler ({e}); fresh start within stage")
 
-    # --- fold plan ------------------------------------------------------
     with open(cfg["manifest"]) as f:
         manifest_obj = json.load(f)
     train_instances = [i for i in manifest_obj["instances"] if i.get("split") == "train"]
@@ -677,13 +582,10 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     write_json(analysis_dir / "config.json", cfg)
     write_json(analysis_dir / "curriculum.json", {"phases": curriculum})
 
-    # Walk the curriculum. ``global_epoch`` is the trainer-wide epoch counter
-    # (visible in checkpoints and per-epoch logs); ``phase_idx`` indexes the
-    # current curriculum entry.
     total_planned = sum(n for _, n in curriculum)
     box_warmup_epochs = int(cfg.get("L2_box_warmup_epochs", 2)) if stage == "L2" else 0
     global_epoch = 0
-    epoch = 0  # for the final stage_complete ckpt
+    epoch = 0
 
     for phase_idx, (phase_name, phase_epochs) in enumerate(curriculum):
         phase_neg_prob = (
@@ -801,7 +703,6 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
                 )
                 del train_loader, val_loader, train_ds, val_ds
 
-            # End of epoch.
             aggregate = aggregate_folds(fold_jsons)
             write_json(analysis_dir / f"epoch_{global_epoch:03d}" / "aggregate.json", aggregate)
             print_aggregate(stage, global_epoch, aggregate, keys=(
@@ -862,11 +763,10 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
         else:
             _early_stop_outer = False
             continue
-        # Break-out from the epoch loop happened ⇒ break the phase loop too.
+
         if _early_stop_outer:
             break
 
-    # Stage-completion ckpt.
     _save_stage_ckpt(
         out_dir=out_dir, stage=stage, epoch=epoch, fold=K - 1,
         stage_completed=True, model=model, optimizer=optimizer,
@@ -889,14 +789,12 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
           f"at epoch {best_metric['epoch']} (phase={best_metric.get('phase')})")
     return {"best_metric": best_metric, "config": cfg, "curriculum": curriculum}
 
-
 def train_stage_L1(**user_kwargs) -> dict:
     try:
         with gpu_cleanup_on_exit():
             return _run_stage("L1", user_kwargs=user_kwargs)
     finally:
         release_gpu_memory(verbose=False)
-
 
 def train_stage_L2(**user_kwargs) -> dict:
     try:
@@ -905,19 +803,12 @@ def train_stage_L2(**user_kwargs) -> dict:
     finally:
         release_gpu_memory(verbose=False)
 
-
 def train_stage_L3(**user_kwargs) -> dict:
     try:
         with gpu_cleanup_on_exit():
             return _run_stage("L3", user_kwargs=user_kwargs)
     finally:
         release_gpu_memory(verbose=False)
-
-
-# ---------------------------------------------------------------------------
-# Eval-only entrypoint
-# ---------------------------------------------------------------------------
-
 
 def evaluate_run(checkpoint: str, **user_kwargs) -> dict:
     try:
@@ -926,9 +817,7 @@ def evaluate_run(checkpoint: str, **user_kwargs) -> dict:
     finally:
         release_gpu_memory(verbose=False)
 
-
 def _evaluate_run_inner(checkpoint: str, user_kwargs: dict) -> dict:
-    """Load ``checkpoint`` and evaluate on test (mixed pos+neg)."""
     cfg = _merge_cfg(user_kwargs)
     device = _resolve_device(cfg)
     print(f"=== [localizer] Evaluating {checkpoint} on test split ({device}) ===")

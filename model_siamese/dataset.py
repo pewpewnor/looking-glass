@@ -1,19 +1,9 @@
-"""Siamese dataset wrappers.
-
-Trains and evaluates on MIXED positive + negative episodes. The siamese
-predicts existence_prob ∈ [0, 1] regardless of the localizer.
-
-Training negative-rate is controlled by ``neg_prob`` (default 0.75 to
-realise a 1:3 pos:neg ratio). Hard-negative cache is supplied by the
-trainer and consulted by the dataset's negative sampler.
-"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from model_shared.dataset import EpisodeDataset, build_dataloader
-
 
 def build_train_loader(
     *,
@@ -32,7 +22,7 @@ def build_train_loader(
     aug_kwargs: dict | None = None,
     hard_neg_cache: dict[str, list[dict]] | None = None,
     hard_neg_frac: float = 0.0,
-) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:                  # type: ignore[name-defined]
+) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:
     aug_kwargs = aug_kwargs or {}
     ds = EpisodeDataset(
         manifest_path=manifest, data_root=data_root,
@@ -52,7 +42,6 @@ def build_train_loader(
     )
     return ds, loader
 
-
 def build_val_loader(
     *,
     manifest: str,
@@ -67,12 +56,7 @@ def build_val_loader(
     seed: int,
     k_min: int,
     k_max: int,
-) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:                  # type: ignore[name-defined]
-    """Validation / test loader.
-
-    Note (manifest v5): every support image on disk is already object-only,
-    so this loader does NO runtime bbox-crop augmentation.
-    """
+) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:
     ds = EpisodeDataset(
         manifest_path=manifest, data_root=data_root,
         split=split, sources=sources,

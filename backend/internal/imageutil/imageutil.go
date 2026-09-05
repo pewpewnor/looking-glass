@@ -20,9 +20,6 @@ var (
 	imagenetStd  = [3]float32{0.229, 0.224, 0.225}
 )
 
-// Letterbox resizes src to fit within a size×size square while preserving aspect ratio,
-// padding the remainder with grey (114,114,114). Returns the padded image, the scale
-// factor applied, and the left/top padding offsets.
 func Letterbox(src image.Image, size int) (image.Image, float64, int, int) {
 	b := src.Bounds()
 	origW, origH := b.Dx(), b.Dy()
@@ -51,7 +48,6 @@ func Letterbox(src image.Image, size int) (image.Image, float64, int, int) {
 	return grey, scale, padLeft, padTop
 }
 
-// ToTensorCHW converts an image to a CHW float32 slice with pixel values in [0,1].
 func ToTensorCHW(img image.Image) []float32 {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -69,7 +65,6 @@ func ToTensorCHW(img image.Image) []float32 {
 	return data
 }
 
-// ToTensorCHWNormalized converts an image to a CHW float32 slice normalised with ImageNet mean/std.
 func ToTensorCHWNormalized(img image.Image) []float32 {
 	data := ToTensorCHW(img)
 	b := img.Bounds()
@@ -83,7 +78,6 @@ func ToTensorCHWNormalized(img image.Image) []float32 {
 	return data
 }
 
-// DrawBBox draws a thick red axis-aligned rectangle on img and returns a new image.
 func DrawBBox(img image.Image, x1, y1, x2, y2 int) image.Image {
 	dc := gg.NewContextForImage(img)
 	dc.SetRGBA(1, 0, 0, 1)
@@ -93,7 +87,6 @@ func DrawBBox(img image.Image, x1, y1, x2, y2 int) image.Image {
 	return dc.Image()
 }
 
-// EncodeJPEGBase64 encodes an image as JPEG and returns a base64 string.
 func EncodeJPEGBase64(img image.Image) (string, error) {
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
@@ -118,9 +111,6 @@ func DecodeImage(r io.Reader) (image.Image, error) {
 	return correctEXIFOrientation(img, bytes.NewReader(data)), nil
 }
 
-// correctEXIFOrientation reads the EXIF Orientation tag from r and rotates /
-// flips img so that its pixels match the intended display orientation.
-// If r contains no EXIF data or the tag is absent, img is returned unchanged.
 func correctEXIFOrientation(img image.Image, r io.Reader) image.Image {
 	x, err := exif.Decode(r)
 	if err != nil {
@@ -134,15 +124,7 @@ func correctEXIFOrientation(img image.Image, r io.Reader) image.Image {
 	if err != nil {
 		return img
 	}
-	// EXIF orientation values and the transform needed to reach normal display:
-	//   1 – no-op
-	//   2 – flip horizontal
-	//   3 – rotate 180°
-	//   4 – flip vertical
-	//   5 – transpose  (rotate 90° CW + flip horizontal)
-	//   6 – rotate 90° CW
-	//   7 – transverse (rotate 90° CCW + flip horizontal)
-	//   8 – rotate 90° CCW
+
 	switch orientation {
 	case 2:
 		return imaging.FlipH(img)
@@ -162,14 +144,10 @@ func correctEXIFOrientation(img image.Image, r io.Reader) image.Image {
 	return img
 }
 
-// ResizeSquare resizes src to size×size (stretching, not letterboxing).
 func ResizeSquare(src image.Image, size int) image.Image {
 	return imaging.Resize(src, size, size, imaging.Lanczos)
 }
 
-// MaskBBox finds the tight bounding box of pixels where mask > threshold.
-// mask is a row-major float32 slice of shape [h][w].
-// Returns x1, y1, x2, y2 inclusive, and ok=false if no pixel exceeded the threshold.
 func MaskBBox(mask []float32, w, h int, threshold float32) (x1, y1, x2, y2 int, ok bool) {
 	x1, y1, x2, y2 = w, h, 0, 0
 	for y := 0; y < h; y++ {
@@ -194,8 +172,6 @@ func MaskBBox(mask []float32, w, h int, threshold float32) (x1, y1, x2, y2 int, 
 	return
 }
 
-// CropImage returns the sub-image defined by [x1,x2)×[y1,y2) in original pixels,
-// scaled from a maskW×maskH mask space to the original image dimensions.
 func CropImageFromMaskBBox(img image.Image, maskX1, maskY1, maskX2, maskY2, maskW, maskH int) image.Image {
 	b := img.Bounds()
 	origW, origH := b.Dx(), b.Dy()
@@ -221,7 +197,6 @@ func CropImageFromMaskBBox(img image.Image, maskX1, maskY1, maskX2, maskY2, mask
 	return imaging.Crop(img, image.Rect(x1, y1, x2, y2))
 }
 
-// EncodeJPEG encodes an image as JPEG bytes.
 func EncodeJPEG(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
@@ -230,7 +205,6 @@ func EncodeJPEG(img image.Image) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// EncodePNG encodes an image as PNG bytes.
 func EncodePNG(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

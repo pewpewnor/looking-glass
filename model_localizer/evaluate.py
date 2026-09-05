@@ -1,15 +1,3 @@
-"""Localizer evaluation.
-
-Reports a comprehensive metric set. When the input loader provides MIXED
-positive + negative episodes (the new default for L2/L3 eval) we add
-abstain-related metrics:
-
-  Positives: standard IoU / containment / mAP family / geometry diagnostics.
-  Negatives: ``bg_prob`` distribution + abstain rate.
-  Both:     ``score_iou_correlation`` (positives only — bg episodes don't have IoU).
-
-Buckets: overall, per_source (hots/insdet, …), per_k (k1, k4, k_max).
-"""
 
 from __future__ import annotations
 
@@ -24,20 +12,11 @@ from torch.utils.data import DataLoader
 from model_localizer.loss import _cxcywh_to_xyxy
 from model_localizer.model import MultiShotLocalizer
 
-
-# COCO-style IoU thresholds (0.50, 0.55, ..., 0.95).
 IOU_THRESHOLDS: tuple[float, ...] = tuple(round(0.50 + 0.05 * i, 2) for i in range(10))
-
-
-# ---------------------------------------------------------------------------
-# Box helpers
-# ---------------------------------------------------------------------------
-
 
 def _box_area(b: torch.Tensor) -> torch.Tensor:
     x1, y1, x2, y2 = b.unbind(-1)
     return (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
-
 
 def _iou_xyxy(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     inter_x1 = torch.maximum(a[..., 0], b[..., 0])
@@ -47,7 +26,6 @@ def _iou_xyxy(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     inter = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
     return inter / (_box_area(a) + _box_area(b) - inter + 1e-6)
 
-
 def _containment_ratio(pred_xyxy: torch.Tensor, gt_xyxy: torch.Tensor) -> torch.Tensor:
     inter_x1 = torch.maximum(pred_xyxy[..., 0], gt_xyxy[..., 0])
     inter_y1 = torch.maximum(pred_xyxy[..., 1], gt_xyxy[..., 1])
@@ -55,12 +33,6 @@ def _containment_ratio(pred_xyxy: torch.Tensor, gt_xyxy: torch.Tensor) -> torch.
     inter_y2 = torch.minimum(pred_xyxy[..., 3], gt_xyxy[..., 3])
     inter = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
     return inter / (_box_area(gt_xyxy) + 1e-6)
-
-
-# ---------------------------------------------------------------------------
-# Stat helpers
-# ---------------------------------------------------------------------------
-
 
 def _ap_101(detections: list[tuple[float, bool]], n_gt: int) -> float:
     if n_gt == 0 or not detections:
@@ -90,17 +62,14 @@ def _ap_101(detections: list[tuple[float, bool]], n_gt: int) -> float:
         ap += precs[j] if j < len(precs) else 0.0
     return ap / 101.0
 
-
 def _safe_mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
-
 
 def _safe_std(xs: list[float]) -> float:
     if len(xs) < 2:
         return 0.0
     m = _safe_mean(xs)
     return (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
-
 
 def _quantile(values: list[float], q: float) -> float:
     if not values:
@@ -116,7 +85,6 @@ def _quantile(values: list[float], q: float) -> float:
     frac = pos - lo
     return s[lo] * (1 - frac) + s[hi] * frac
 
-
 def _pearson(xs: list[float], ys: list[float]) -> float:
     n = min(len(xs), len(ys))
     if n < 2:
@@ -130,15 +98,9 @@ def _pearson(xs: list[float], ys: list[float]) -> float:
     cov = sum((x - mx) * (y - my) for x, y in zip(xs[:n], ys[:n]))
     return cov / math.sqrt(sx * sy)
 
-
-# ---------------------------------------------------------------------------
-# Bucket
-# ---------------------------------------------------------------------------
-
-
 def _empty_bucket() -> dict[str, list]:
     return {
-        # positives
+
         "iou": [],
         "contain": [],
         "score": [],
@@ -146,11 +108,10 @@ def _empty_bucket() -> dict[str, list]:
         "pred_box_area": [],
         "gt_box_area": [],
         "center_distance": [],
-        # negatives
+
         "bg_prob_neg": [],
         "score_neg": [],
     }
-
 
 def _bucket_metrics(b: dict[str, list], *, abstain_threshold: float = 0.5) -> dict[str, Any]:
     n_pos = len(b["iou"])
@@ -160,7 +121,6 @@ def _bucket_metrics(b: dict[str, list], *, abstain_threshold: float = 0.5) -> di
     if n_pos == 0 and n_neg == 0:
         return out
 
-    # ── Positives metrics ───────────────────────────────────────────────
     if n_pos > 0:
         out["iou_mean"]   = _safe_mean(b["iou"])
         out["iou_median"] = _quantile(b["iou"], 0.5)
@@ -188,7 +148,6 @@ def _bucket_metrics(b: dict[str, list], *, abstain_threshold: float = 0.5) -> di
             1 for iou, c in zip(b["iou"], b["contain"]) if iou >= 0.5 and c >= 0.9
         ) / n_pos
 
-        # mAP family — TPs gated by IoU per threshold.
         ap_per_iou: dict[str, float] = {}
         for thr in IOU_THRESHOLDS:
             detections = [(s, iou >= thr) for s, iou in zip(b["score"], b["iou"])]
@@ -203,7 +162,6 @@ def _bucket_metrics(b: dict[str, list], *, abstain_threshold: float = 0.5) -> di
         out["map_50_containment"] = _ap_101(det_c50, n_gt=n_pos)
         out["map_90_containment"] = _ap_101(det_c90, n_gt=n_pos)
 
-        # Box geometry.
         out["mean_pred_box_area"]    = _safe_mean(b["pred_box_area"])
         out["std_pred_box_area"]     = _safe_std(b["pred_box_area"])
         out["frac_pred_box_too_big"] = sum(1 for a in b["pred_box_area"] if a > 0.4) / n_pos
@@ -230,19 +188,17 @@ def _bucket_metrics(b: dict[str, list], *, abstain_threshold: float = 0.5) -> di
         out["score_p75"]             = _quantile(b["score"], 0.75)
         out["score_iou_correlation"] = _pearson(b["score"], b["iou"])
 
-        # Abstain stats on positives.
         out["bg_prob_pos_mean"]   = _safe_mean(b["bg_prob_pos"])
         out["bg_prob_pos_median"] = _quantile(b["bg_prob_pos"], 0.5)
         out["abstain_rate_pos"]   = sum(1 for v in b["bg_prob_pos"] if v >= abstain_threshold) / n_pos
 
-    # ── Negatives metrics ───────────────────────────────────────────────
     if n_neg > 0:
         out["bg_prob_neg_mean"]   = _safe_mean(b["bg_prob_neg"])
         out["bg_prob_neg_median"] = _quantile(b["bg_prob_neg"], 0.5)
         out["abstain_rate_neg"]   = sum(1 for v in b["bg_prob_neg"] if v >= abstain_threshold) / n_neg
         out["score_neg_mean"]     = _safe_mean(b["score_neg"])
         out["score_neg_p75"]      = _quantile(b["score_neg"], 0.75)
-        # True abstain = correctly classify negative as "no object".
+
         out["tn_rate"] = out["abstain_rate_neg"]
         out["fp_rate"] = 1.0 - out["abstain_rate_neg"]
 
@@ -250,12 +206,6 @@ def _bucket_metrics(b: dict[str, list], *, abstain_threshold: float = 0.5) -> di
         out["abstain_gap"] = out["bg_prob_neg_mean"] - out["bg_prob_pos_mean"]
 
     return out
-
-
-# ---------------------------------------------------------------------------
-# Main evaluator
-# ---------------------------------------------------------------------------
-
 
 @torch.no_grad()
 def evaluate(
@@ -268,11 +218,6 @@ def evaluate(
     phase0: bool = False,
     abstain_threshold: float = 0.5,
 ) -> dict[str, Any]:
-    """Run evaluation. Supports mixed positive + negative episodes.
-
-    Positive episodes contribute to all geometry / mAP metrics.
-    Negative episodes contribute abstain-rate / bg-prob metrics.
-    """
     model.eval()
     overall = _empty_bucket()
     per_source: dict[str, dict[str, list]] = defaultdict(_empty_bucket)

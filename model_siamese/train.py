@@ -1,29 +1,3 @@
-"""Siamese training orchestrator.
-
-Public entry points:
-    train_phase0(...)              # alias for evaluate_phase0 (no training)
-    evaluate_phase0(...)           # zero-shot DINOv2-cosine baseline
-    train_stage_S1(...)
-    train_stage_S2(...)
-    evaluate_run(checkpoint=..., ...)
-
-Curriculum (NEW):
-    Each stage runs in 1..N sub-phases (insdet → hots → mixed by default).
-    Configure via ``S2_curriculum`` and ``S2_epochs_<phase>`` keys.
-
-Threshold persistence (NEW):
-    The trainer tracks the val ``best_f1_threshold`` per epoch and writes the
-    final / median value into the stage_complete checkpoint as
-    ``eval_threshold``. ``evaluate_run`` reads this and uses it as the decision
-    threshold by default, fixing the previous "tp=0 because threshold=0.5
-    never reached" pathology.
-
-Loss prior (NEW):
-    The head's final bias is initialised so sigmoid(b₀) = positive_prior
-    (= 1 - neg_prob). This puts the very-first prediction's mean on the
-    correct prior instead of forcing the model to climb out of a too-low
-    sigmoid start.
-"""
 
 from __future__ import annotations
 
@@ -52,35 +26,27 @@ from model_siamese.model import MultiShotSiamese
 from model_siamese.optim import build_optimizer_for_stage, build_scheduler
 from model_siamese.train_loop import train_one_pass
 
-
 MODEL_KIND = "siamese"
-
-
-# ---------------------------------------------------------------------------
-# Default config
-# ---------------------------------------------------------------------------
 
 DEFAULT_CFG: dict[str, Any] = {
     "manifest": "dataset/aggregated/manifest.json",
     "data_root": None,
     "out_root": "checkpoints",
     "analysis_root": "model_analysis",
-    # Hardware
+
     "img_size": 518,
     "batch_size": 4,
     "grad_accum_steps": 2,
     "num_workers": 2,
     "use_amp": True,
     "device": None,
-    # Folds
+
     "folds": 3,
     "fold_seed": 42,
-    # K range
+
     "k_min": 1,
     "k_max": 10,
-    # ──────────────────────────────────────────────────────────────────
-    # Stage role + sizing (REBALANCED).
-    #
+
     #   S1  Head-only training. DINOv2 frozen. Highest LR (head is from
     #       scratch). Curriculum bias toward mixed so the head sees the
     #       full distribution after each per-source phase. Longest of the
@@ -89,14 +55,14 @@ DEFAULT_CFG: dict[str, Any] = {
     #   S2  + LoRA fine-tune. Head LR drops 5× (it's already converged
     #       from S1). LoRA gets a fresh-init LR roughly between S1 head LR
     #       and S2 head LR. Shorter than S1 — most of the value is in S1.
-    # ──────────────────────────────────────────────────────────────────
+
     "S1_epochs": 10,
     "S2_epochs": 6,
     "S1_eps_per_fold": 500,
     "S2_eps_per_fold": 400,
     "val_episodes": 200,
     "test_episodes": 400,
-    # Curriculum.
+
     "S1_curriculum": ["insdet", "hots", "mixed"],
     "S2_curriculum": ["insdet", "hots", "mixed"],
     "S1_epochs_insdet": 2,
@@ -105,18 +71,17 @@ DEFAULT_CFG: dict[str, Any] = {
     "S2_epochs_insdet": 1,
     "S2_epochs_hots":   1,
     "S2_epochs_mixed":  4,
-    # LRs (REBALANCED).
     # S1 head LR is the same magnitude as before (1e-3) since the head is
     # from-scratch on top of a frozen DINOv2. S2 head LR drops 5× because
     # the head is already converged from S1; LoRA gets its own fresh-init LR.
     "lr_head_S1": 1e-3,
     "lr_head_S2": 2e-4,
     "lr_lora_S2": 3e-4,
-    # Optim
+
     "weight_decay": 1e-4,
     "grad_clip": 1.0,
     "warmup_frac": 0.05,
-    # Loss — balanced focal-α (was 0.25 → predictions collapsed).
+
     "focal_alpha": 0.5,
     "focal_gamma": 2.0,
     "variance_target": 0.4,
@@ -126,20 +91,20 @@ DEFAULT_CFG: dict[str, Any] = {
     # the negative side biases the model toward "no" everywhere.
     "neg_prob": 0.5,
     "hard_neg_cache_frac": 0.5,
-    # Architecture
+
     "dinov2_model_name": "facebook/dinov2-small",
     "cross_attn_heads": 6,
     "cross_attn_dropout": 0.1,
     "head_hidden_1": 256,
     "head_hidden_2": 64,
     "head_dropout": 0.2,
-    # LoRA
+
     "lora_r": 8,
     "lora_alpha": 16,
     "lora_dropout": 0.1,
     "lora_last_n_layers": 4,
     "lora_target_modules": ("query", "value"),
-    # Augmentation
+
     "aug_color_jitter": 0.4,
     "aug_hue": 0.1,
     "aug_grayscale_prob": 0.2,
@@ -150,20 +115,19 @@ DEFAULT_CFG: dict[str, Any] = {
     "aug_rrc_scale": (0.5, 1.0),
     "aug_hflip_prob": 0.5,
     "aug_query_color_jitter": 0.2,
-    # Early stopping
+
     "S1_early_stop_patience": 4,
     "S2_early_stop_patience": 4,
-    "early_stop_metric": "f1",        # "auroc" | "f1" | "fpr_inv"
+    "early_stop_metric": "f1",
     # Eval threshold (used at eval time if no per-stage one persisted; will
     # be overridden by the val-discovered best_f1_threshold once training
     # completes — see ``evaluate_run``).
     "eval_threshold": 0.5,
-    # Misc
+
     "seed": 42,
     "keep_last_n": 0,
     "smoke": False,
 }
-
 
 SMOKE_OVERRIDES: dict[str, Any] = {
     "img_size": 224,
@@ -186,18 +150,12 @@ SMOKE_OVERRIDES: dict[str, Any] = {
     "lora_r": 4,
     "lora_alpha": 8,
     "use_amp": False,
-    # Smoke runs one phase only.
+
     "S1_curriculum": ["mixed"],
     "S2_curriculum": ["mixed"],
     "S1_epochs_mixed": 1,
     "S2_epochs_mixed": 1,
 }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _set_seed(seed: int) -> None:
     _random.seed(seed)
@@ -206,13 +164,11 @@ def _set_seed(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-
 def _resolve_device(cfg: dict) -> torch.device:
     dev = cfg.get("device")
     if dev is None:
         dev = "cuda" if torch.cuda.is_available() else "cpu"
     return torch.device(dev)
-
 
 def _merge_cfg(user_kwargs: dict) -> dict:
     cfg = dict(DEFAULT_CFG)
@@ -221,7 +177,6 @@ def _merge_cfg(user_kwargs: dict) -> dict:
         cfg.update(SMOKE_OVERRIDES)
         cfg.update(user_kwargs or {})
     return cfg
-
 
 def _stage_lrs(stage: str, cfg: dict) -> dict:
     out = dict(cfg)
@@ -233,7 +188,6 @@ def _stage_lrs(stage: str, cfg: dict) -> dict:
             out.setdefault(f"lr_{k}", 0.0)
     return out
 
-
 def _stage_dirs(cfg: dict, stage: str) -> tuple[Path, Path]:
     out_dir = Path(cfg["out_root"]) / MODEL_KIND / stage
     analysis_dir = Path(cfg["analysis_root"]) / MODEL_KIND / stage
@@ -241,12 +195,10 @@ def _stage_dirs(cfg: dict, stage: str) -> tuple[Path, Path]:
     analysis_dir.mkdir(parents=True, exist_ok=True)
     return out_dir, analysis_dir
 
-
 def _make_scaler(use_amp: bool, device: torch.device):
     if use_amp and device.type == "cuda":
         return torch.amp.GradScaler("cuda")
     return None
-
 
 def _build_model(cfg: dict, *, lora_active: bool = False) -> MultiShotSiamese:
     p_pos = 1.0 - float(cfg.get("neg_prob", 0.5))
@@ -269,7 +221,6 @@ def _build_model(cfg: dict, *, lora_active: bool = False) -> MultiShotSiamese:
         )
     return m
 
-
 def _augmentation_kwargs(cfg: dict) -> dict[str, Any]:
     return dict(
         aug_color_jitter=cfg["aug_color_jitter"],
@@ -283,7 +234,6 @@ def _augmentation_kwargs(cfg: dict) -> dict[str, Any]:
         aug_hflip_prob=cfg["aug_hflip_prob"],
         aug_query_color_jitter=cfg["aug_query_color_jitter"],
     )
-
 
 def _save_stage_ckpt(
     *, out_dir: Path, stage: str, epoch: int, fold: int,
@@ -330,12 +280,6 @@ def _save_stage_ckpt(
         atomic_save(payload, extra_path, label=extra_path.stem)
     return out_dir / "last.pt"
 
-
-# ---------------------------------------------------------------------------
-# Phase 0
-# ---------------------------------------------------------------------------
-
-
 _TRAIN_PRIORITY = ("loss", "focal", "variance", "decorrelation", "grad_norm", "n_steps")
 _VAL_PRIORITY = ("n", "n_pos", "n_neg",
                  "auroc", "pr_auc", "avg_precision",
@@ -354,11 +298,8 @@ _PER_SOURCE_KEYS = ("n", "n_pos", "auroc", "pr_auc", "f1", "best_f1",
                     "fpr", "fnr", "accuracy", "mcc",
                     "mean_score_pos", "mean_score_neg", "score_gap")
 
-
 def train_phase0(**user_kwargs) -> dict:
-    """Phase 0 alias for evaluate_phase0."""
     return evaluate_phase0(**user_kwargs)
-
 
 def evaluate_phase0(**user_kwargs) -> dict:
     try:
@@ -367,21 +308,12 @@ def evaluate_phase0(**user_kwargs) -> dict:
     finally:
         release_gpu_memory(verbose=False)
 
-
 def evaluate_phase0_final_style(**user_kwargs) -> dict:
-    """Phase 0 baseline evaluated under the same threshold regime as the final
-    (S2) eval: a *fixed* threshold (``cfg['eval_threshold']``, default 0.5) is
-    used instead of the optimistic ``"auto"`` sweep on test. ``neg_prob`` is
-    already symmetric between baseline and final, so loader-side this matches
-    ``evaluate_run``. Lets accuracy / precision / recall / f1 / FPR / FNR be
-    compared apples-to-apples against the trained pipeline.
-    """
     try:
         with gpu_cleanup_on_exit():
             return _evaluate_phase0_final_style_inner(user_kwargs)
     finally:
         release_gpu_memory(verbose=False)
-
 
 def _evaluate_phase0_inner(user_kwargs: dict) -> dict:
     cfg = _merge_cfg(user_kwargs)
@@ -426,20 +358,7 @@ def _evaluate_phase0_inner(user_kwargs: dict) -> dict:
     print(f"[siamese] Phase 0 complete. Results: {out_dir / 'results.json'}")
     return metrics
 
-
 def _evaluate_phase0_final_style_inner(user_kwargs: dict) -> dict:
-    """Phase 0 baseline under the final (S2) eval threshold regime.
-
-    Same model as ``_evaluate_phase0_inner`` (zero-shot DINOv2 cosine) and the
-    same loader (``neg_prob`` is already symmetric across baseline and final).
-    The single difference is the *threshold*: instead of ``"auto"`` (best-F1
-    swept on test, slightly optimistic), this variant uses a fixed threshold
-    pulled from ``cfg['eval_threshold']`` — exactly the convention
-    ``evaluate_run`` falls back to when a checkpoint has no
-    ``learned_threshold``. Results are saved under
-    ``phase0/test_eval_final_style.json`` so the existing baseline is
-    preserved.
-    """
     cfg = _merge_cfg(user_kwargs)
     device = _resolve_device(cfg)
     out_dir, analysis_dir = _stage_dirs(cfg, "phase0")
@@ -495,18 +414,11 @@ def _evaluate_phase0_final_style_inner(user_kwargs: dict) -> dict:
     )
     return metrics
 
-
-# ---------------------------------------------------------------------------
-# Stage runner with curriculum
-# ---------------------------------------------------------------------------
-
-
 _PHASE_TO_SOURCES: dict[str, list[str] | None] = {
     "insdet": ["insdet"],
     "hots":   ["hots"],
     "mixed":  None,
 }
-
 
 def _resolve_curriculum(stage: str, cfg: dict) -> list[tuple[str, int]]:
     curr = list(cfg.get(f"{stage}_curriculum", []) or [])
@@ -520,7 +432,6 @@ def _resolve_curriculum(stage: str, cfg: dict) -> list[tuple[str, int]]:
     if not out:
         return [("mixed", int(cfg.get(f"{stage}_epochs", 1)))]
     return out
-
 
 def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     cfg = _merge_cfg(user_kwargs)
@@ -537,7 +448,6 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     lora_active = (stage == "S2")
     model = _build_model(cfg, lora_active=lora_active).to(device)
 
-    # --- resume / warm-start --------------------------------------------
     resume = user_kwargs.get("resume", True)
     resume_path = resolve_resume_path(resume, out_dir)
     if resume_path is None:
@@ -598,7 +508,7 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
                 metrics_history = list(ckpt_full.get("metrics_history") or [])
                 print(f"  restored optim+sched at epoch={saved_epoch} fold={saved_fold}; "
                       f"continuing from epoch={resume_global_epoch} fold={resume_fold}")
-            except Exception as e:                                                 # noqa: BLE001
+            except Exception as e:
                 print(f"  warning: failed to restore optimizer/scheduler ({e}); fresh within stage")
 
     with open(cfg["manifest"]) as f:
@@ -704,7 +614,6 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
                     progress_every=20,
                 )
 
-                # Update shared hard-neg cache.
                 for iid, items in recorder.items():
                     hard_neg_cache.setdefault(iid, []).extend(items)
                     hard_neg_cache[iid] = hard_neg_cache[iid][-256:]
@@ -850,14 +759,12 @@ def _run_stage(stage: str, *, user_kwargs: dict) -> dict:
     return {"best_metric": best_metric, "config": cfg,
             "learned_threshold": final_threshold, "curriculum": curriculum}
 
-
 def train_stage_S1(**user_kwargs) -> dict:
     try:
         with gpu_cleanup_on_exit():
             return _run_stage("S1", user_kwargs=user_kwargs)
     finally:
         release_gpu_memory(verbose=False)
-
 
 def train_stage_S2(**user_kwargs) -> dict:
     try:
@@ -866,12 +773,10 @@ def train_stage_S2(**user_kwargs) -> dict:
     finally:
         release_gpu_memory(verbose=False)
 
-
 def _median(xs: list[float]) -> float:
     if not xs:
         return 0.5
     return float(statistics.median(xs))
-
 
 def evaluate_run(checkpoint: str, **user_kwargs) -> dict:
     try:
@@ -879,7 +784,6 @@ def evaluate_run(checkpoint: str, **user_kwargs) -> dict:
             return _evaluate_run_inner(checkpoint, user_kwargs)
     finally:
         release_gpu_memory(verbose=False)
-
 
 def _evaluate_run_inner(checkpoint: str, user_kwargs: dict) -> dict:
     cfg = _merge_cfg(user_kwargs)

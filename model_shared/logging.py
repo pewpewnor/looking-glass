@@ -1,9 +1,7 @@
-"""Console logging shared by both trainers."""
 
 from __future__ import annotations
 
 from typing import Any
-
 
 def _format_kv(k: str, v: Any) -> str | None:
     if not isinstance(v, (int, float)) or isinstance(v, bool):
@@ -11,7 +9,6 @@ def _format_kv(k: str, v: Any) -> str | None:
     if k in ("n", "n_pos", "n_neg", "n_steps", "k", "epoch", "fold") or isinstance(v, int):
         return f"{k}={int(v)}"
     return f"{k}={float(v):.4f}"
-
 
 def _wrap_lines(prefix: str, parts: list[str], width: int = 110) -> list[str]:
     out: list[str] = []
@@ -25,7 +22,6 @@ def _wrap_lines(prefix: str, parts: list[str], width: int = 110) -> list[str]:
     if cur:
         out.append(f"{prefix}{cur}")
     return out
-
 
 def print_epoch_log(
     *,
@@ -74,7 +70,6 @@ def print_epoch_log(
         if chunks:
             print(f"│  {k_label:<13s}: {'  '.join(chunks)}")
     print("└─")
-
 
 def print_aggregate(
     stage: str, epoch: int, aggregate: dict, keys: tuple[tuple[str, str], ...],

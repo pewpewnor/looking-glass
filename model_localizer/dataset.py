@@ -1,14 +1,7 @@
-"""Localizer dataset wrappers.
-
-L1 trains positives only (the fusion has nothing to learn from negatives at
-that stage). L2/L3 mix in negatives so the abstain channel gets gradient;
-the loss uses ``is_present`` to route per-episode supervision.
-"""
 
 from __future__ import annotations
 
 from model_shared.dataset import EpisodeDataset, build_dataloader
-
 
 def build_train_loader(
     *,
@@ -26,7 +19,7 @@ def build_train_loader(
     force_positive: bool = True,
     neg_prob: float = 0.0,
     aug_kwargs: dict | None = None,
-) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:                  # type: ignore[name-defined]
+) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:
     aug_kwargs = aug_kwargs or {}
     ds = EpisodeDataset(
         manifest_path=manifest, data_root=data_root,
@@ -45,7 +38,6 @@ def build_train_loader(
     )
     return ds, loader
 
-
 def build_val_loader(
     *,
     manifest: str,
@@ -62,14 +54,7 @@ def build_val_loader(
     force_positive: bool = True,
     neg_prob: float = 0.0,
     return_native: bool = False,
-) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:                  # type: ignore[name-defined]
-    """Validation / test loader.
-
-    Note (manifest v5): every InsDet support image on disk has already been
-    cropped to its object bbox + 20% padding by the aggregator. HOTS
-    supports are object-centred at the source. So this loader does NO
-    runtime bbox-crop augmentation — supports are letterboxed + identity.
-    """
+) -> tuple[EpisodeDataset, "torch.utils.data.DataLoader"]:
     ds = EpisodeDataset(
         manifest_path=manifest, data_root=data_root,
         split=split, sources=sources,

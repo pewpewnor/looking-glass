@@ -1,32 +1,3 @@
-"""Episode dataset shared by localizer and siamese.
-
-Returns one episode per __getitem__:
-    {
-      "support_imgs":  (K_max, 3, S, S)  un-normalized RGB tensors in [0,1].
-                       Real supports occupy slots 0..k-1; padding fills the rest.
-      "support_mask":  (K_max,)          bool, True where the slot is real.
-      "k":             int               actual number of real supports this episode.
-      "query_img":     (3, S, S)         un-normalized RGB tensor in [0,1].
-      "query_bbox":    (4,)              cxcywh in [0,1] (zeros for negatives).
-      "is_present":    bool tensor       True for positive episodes.
-      "instance_id":   str
-      "source":        str
-      "native_size":   (2,) int32        original (W, H) of the query image.
-      "native_bbox":   (4,)              original xyxy bbox in native coords (zeros for negatives).
-    }
-
-Each model normalizes inside its own forward (OWLv2 = CLIP stats; DINOv2 = different stats),
-which is why the dataset returns un-normalized tensors.
-
-Support preprocessing: NO bbox cropping. Letterbox resize (preserve aspect ratio,
-pad to img_size with mean colour) + per-view augmentation. The K supports per
-episode are sampled with K ~ Uniform{k_min..k_max} at train time, and a
-deterministic K from a per-source roundrobin at eval time.
-
-Negative episode generation (for siamese only): query is sampled from a
-DIFFERENT instance of the SAME source. With probability hard_neg_prob the
-negative is drawn from the per-fold hard-negative cache.
-"""
 
 from __future__ import annotations
 
@@ -42,17 +13,10 @@ from torchvision.transforms import functional as TF
 
 from model_shared.manifest import filter_instances, load_manifest
 
-
 DEFAULT_IMG_SIZE = 768
 DEFAULT_K_MIN = 1
 DEFAULT_K_MAX = 10
 DEFAULT_NEG_PROB = 0.5
-
-
-# ---------------------------------------------------------------------------
-# Bbox helpers
-# ---------------------------------------------------------------------------
-
 
 def _xyxy_to_cxcywh_norm(bbox: list[float], img_w: int, img_h: int) -> list[float]:
     x1, y1, x2, y2 = bbox
@@ -75,20 +39,9 @@ def _xyxy_to_cxcywh_norm(bbox: list[float], img_w: int, img_h: int) -> list[floa
         (y2c - y1c) / img_h,
     ]
 
-
-# ---------------------------------------------------------------------------
-# Image preprocessing
-# ---------------------------------------------------------------------------
-
-
 def _letterbox(
     img: Image.Image, size: int, pad_color: tuple[int, int, int] = (114, 114, 114)
 ) -> tuple[Image.Image, float, int, int]:
-    """Resize keeping aspect ratio, pad to (size, size).
-
-    Returns (output_img, scale, pad_left, pad_top). The scale and pads are
-    needed to map a bbox from native coordinates to letterboxed coordinates.
-    """
     w, h = img.size
     scale = size / max(w, h)
     new_w = max(1, int(round(w * scale)))
@@ -99,7 +52,6 @@ def _letterbox(
     pad_top = (size - new_h) // 2
     out.paste(img_resized, (pad_left, pad_top))
     return out, scale, pad_left, pad_top
-
 
 def _letterbox_bbox(
     bbox_xyxy: list[float], scale: float, pad_left: int, pad_top: int
@@ -112,16 +64,7 @@ def _letterbox_bbox(
         y2 * scale + pad_top,
     ]
 
-
 class _SupportAugment:
-    """Per-view stochastic augmentation for support images.
-
-    NOTE (manifest v5): every support image on disk is already object-only.
-    HOTS supports were object-centred in the source dataset; InsDet supports
-    were physically cropped to bbox + 20%% pad by the aggregator. So this
-    class does NO runtime bbox-cropping. It just letterboxes + applies
-    photometric / random-erase augmentations at train time.
-    """
 
     def __init__(self, img_size: int, train: bool, *,
                  color_jitter: float = 0.4, hue: float = 0.1,
@@ -149,7 +92,7 @@ class _SupportAugment:
         self, img: Image.Image, rng: random.Random,
     ) -> torch.Tensor:
         if self.train:
-            # 1) Random horizontal flip.
+
             if rng.random() < self.hflip_prob:
                 img = ImageOps.mirror(img)
             # 2) Mild random resized crop (no bbox crop — supports are
@@ -161,18 +104,18 @@ class _SupportAugment:
             x0 = rng.randint(0, max(w - cw, 0))
             y0 = rng.randint(0, max(h - ch, 0))
             img = img.crop((x0, y0, x0 + cw, y0 + ch))
-            # 3) Letterbox to img_size.
+
             img, _, _, _ = _letterbox(img, self.img_size)
-            # 4) Color jitter.
+
             img = self.color(img)
-            # 5) Random grayscale.
+
             if rng.random() < self.grayscale_prob:
                 img = ImageOps.grayscale(img).convert("RGB")
-            # 6) Random blur.
+
             if rng.random() < self.blur_prob:
                 img = img.filter(ImageFilter.GaussianBlur(
                     radius=rng.uniform(*self.blur_sigma)))
-            t = TF.to_tensor(img)  # (3, S, S) in [0, 1]
+            t = TF.to_tensor(img)
             # 7) Random erasing on tensor. With supports already object-only,
             #    erase is a useful regulariser (it forces the model to use
             #    multiple object regions, not just one patch).
@@ -183,11 +126,9 @@ class _SupportAugment:
             img, _, _, _ = _letterbox(img, self.img_size)
             return TF.to_tensor(img)
 
-
 def _random_erase(
     t: torch.Tensor, scale_range: tuple[float, float], rng: random.Random
 ) -> torch.Tensor:
-    """In-place random erase: replace a random-area patch with mean colour."""
     _, h, w = t.shape
     area = h * w
     target_area = rng.uniform(*scale_range) * area
@@ -203,9 +144,7 @@ def _random_erase(
     t[:, y0:y0 + eh, x0:x0 + ew] = fill
     return t
 
-
 class _QueryTransform:
-    """Mild colour jitter only — no spatial augmentation (preserves bbox)."""
 
     def __init__(self, img_size: int, train: bool, color_jitter: float = 0.2):
         self.img_size = img_size
@@ -226,31 +165,7 @@ class _QueryTransform:
         )
         return TF.to_tensor(img_lb), bbox_lb, scale, pad_left, pad_top
 
-
-# ---------------------------------------------------------------------------
-# Episode dataset
-# ---------------------------------------------------------------------------
-
-
 class EpisodeDataset(Dataset):
-    """Variable-K (1..10) episode dataset.
-
-    Args:
-        manifest_path : path to dataset/aggregated/manifest.json
-        split         : "train" | "test" | None
-        sources       : optional list of source filters (e.g. ["hots"])
-        episodes_per_epoch : number of episodes the dataset reports (train mode)
-        k_min, k_max  : inclusive range of supports per episode
-        force_positive: if True, every episode is positive (localizer mode)
-        neg_prob      : probability of generating a negative episode (siamese mode)
-        train         : whether to apply augmentation
-        img_size      : output square size
-        seed          : RNG seed offset
-        return_native : also return query as PIL + native bbox / size
-        hard_neg_cache: optional dict mapping (instance_id) -> list of (path, source) tuples
-                        used to draw a fraction of negatives from misclassifications
-        hard_neg_frac : fraction of negatives that should be hard
-    """
 
     def __init__(
         self,
@@ -270,7 +185,7 @@ class EpisodeDataset(Dataset):
         return_native: bool = False,
         hard_neg_cache: dict[str, list[dict]] | None = None,
         hard_neg_frac: float = 0.0,
-        # Augmentation knobs (forwarded into _SupportAugment / _QueryTransform).
+
         aug_color_jitter: float = 0.4,
         aug_hue: float = 0.1,
         aug_grayscale_prob: float = 0.2,
@@ -312,8 +227,6 @@ class EpisodeDataset(Dataset):
             self.img_size, self.train, color_jitter=aug_query_color_jitter,
         )
 
-    # --- fold management ---------------------------------------------------
-
     def set_fold(
         self,
         train_ids: set[str] | None = None,
@@ -332,8 +245,6 @@ class EpisodeDataset(Dataset):
                 f"val_ids={None if val_ids is None else len(val_ids)}, "
                 f"available={len(self._all_instances)}"
             )
-
-    # --- helpers -----------------------------------------------------------
 
     def _resolve(self, p: str) -> Path:
         path = Path(p)
@@ -362,22 +273,14 @@ class EpisodeDataset(Dataset):
     def _sample_query_negative(
         self, instance: dict, rng: random.Random,
     ) -> tuple[Image.Image, str]:
-        """Return (image, path_used) for a negative query.
 
-        The returned path lets the trainer record actually-misclassified
-        negative paths back into ``hard_neg_cache``, so the next epoch can
-        oversample these. We skip any cache entries with an empty ``path``
-        (these are stale sentinels from older recorders that did not yet
-        thread the literal path through).
-        """
-        # Hard negative branch.
         if self.hard_neg_frac > 0.0 and self.hard_neg_cache and rng.random() < self.hard_neg_frac:
             cache = self.hard_neg_cache.get(instance["instance_id"], [])
             valid = [hn for hn in cache if hn.get("path")]
             if valid:
                 hn = rng.choice(valid)
                 return self._load(hn["path"]), hn["path"]
-        # Same-source other-instance.
+
         same_source = [
             i for i in self.instances
             if i["instance_id"] != instance["instance_id"]
@@ -399,7 +302,6 @@ class EpisodeDataset(Dataset):
         k = force_k if force_k is not None else self._sample_k(rng, n_pool)
         k = max(1, min(k, self.k_max))
 
-        # --- supports ---------------------------------------------------
         # Supports are already object-only on disk (see manifest v5), so we
         # don't need to pass bbox_xyxy here — _SupportAugment letterboxes +
         # photometric-augments only.
@@ -408,15 +310,14 @@ class EpisodeDataset(Dataset):
             self._support_aug(self._load(s["path"]), rng)
             for s in sup_entries
         ]
-        # Pad to k_max.
+
         if len(sup_imgs) < self.k_max:
             pad = torch.zeros(3, self.img_size, self.img_size)
             sup_imgs = sup_imgs + [pad] * (self.k_max - len(sup_imgs))
-        sup_t = torch.stack(sup_imgs, dim=0)                   # (k_max, 3, S, S)
+        sup_t = torch.stack(sup_imgs, dim=0)
         mask = torch.zeros(self.k_max, dtype=torch.bool)
         mask[:k] = True
 
-        # --- query ------------------------------------------------------
         is_negative = (not self.force_positive) and rng.random() < self.neg_prob
         if not is_negative:
             q_img, q_bbox_native = self._sample_query_positive(instance, rng)
@@ -443,7 +344,6 @@ class EpisodeDataset(Dataset):
                 episode["query_native"] = q_img
             return episode
 
-        # Negative.
         q_img, q_path = self._sample_query_negative(instance, rng)
         native_w, native_h = q_img.size
         q_t, _, _, _, _ = self._query_tf(q_img, None, rng if self.train else None)
@@ -479,19 +379,13 @@ class EpisodeDataset(Dataset):
             instance = rng.choice(self.instances)
         else:
             instance = self.instances[idx % len(self.instances)]
-        # Eval mode: deterministic K via roundrobin over (1, 4, k_max) plus filler.
+
         force_k: int | None = None
         if not self.train:
             k_choices = sorted(set([self.k_min, 4, self.k_max]))
             force_k = k_choices[idx % len(k_choices)]
             force_k = max(1, min(force_k, len(instance["support_images"]), self.k_max))
         return self._build_episode(instance, rng, force_k=force_k)
-
-
-# ---------------------------------------------------------------------------
-# Collate
-# ---------------------------------------------------------------------------
-
 
 def collate(batch: list[dict[str, Any]]) -> dict[str, Any]:
     out: dict[str, Any] = {
@@ -513,12 +407,6 @@ def collate(batch: list[dict[str, Any]]) -> dict[str, Any]:
     if "query_path" in batch[0]:
         out["query_path"] = [b["query_path"] for b in batch]
     return out
-
-
-# ---------------------------------------------------------------------------
-# DataLoader builders
-# ---------------------------------------------------------------------------
-
 
 def build_dataloader(
     ds: Dataset,

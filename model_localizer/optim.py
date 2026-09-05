@@ -1,10 +1,3 @@
-"""Per-stage optimizer + scheduler factory for the localizer.
-
-Stages:
-    L1: fusion only.
-    L2: + class_head + box_head + layer_norm.
-    L3: + LoRA q/v on last 4 vision blocks.
-"""
 
 from __future__ import annotations
 
@@ -13,11 +6,9 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from model_localizer.model import MultiShotLocalizer
 
-
 def build_optimizer_for_stage(
     stage: str, model: MultiShotLocalizer, cfg: dict,
 ) -> tuple[torch.optim.Optimizer, list[torch.nn.Parameter] | None]:
-    """Returns (optimizer, lora_params|None)."""
     wd = float(cfg["weight_decay"])
     lora_params: list[torch.nn.Parameter] | None = None
 
@@ -29,7 +20,6 @@ def build_optimizer_for_stage(
             last_n_layers=int(cfg["lora_last_n_layers"]),
         )
 
-    # Fresh freeze, then opt-in.
     model.freeze_backbone()
     for p in model.fusion_params():
         p.requires_grad = True
@@ -66,7 +56,6 @@ def build_optimizer_for_stage(
 
     optimizer = torch.optim.AdamW(groups, betas=(0.9, 0.999))
     return optimizer, lora_params
-
 
 def build_scheduler(
     optimizer: torch.optim.Optimizer, *, total_steps: int, warmup_frac: float,

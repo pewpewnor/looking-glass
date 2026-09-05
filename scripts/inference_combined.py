@@ -1,23 +1,3 @@
-"""Combined cascaded inference: siamese → localizer.
-
-Modes:
-    "hard":             run siamese; if existence_prob < threshold, return
-                        {exists: False, bbox: None}; else run localizer.
-    "soft":             always run both, return both fields; the bbox is
-                        flagged as low-confidence below threshold but kept.
-    "always_localize":  ignore siamese for the bbox decision; always return
-                        localizer's bbox plus the siamese's existence_prob.
-
-Public API:
-    run_combined(siamese_ckpt, localizer_ckpt, support_paths, query_path,
-                 *, existence_threshold=0.5, existence_threshold_mode="hard",
-                 ...)
-        -> dict {existence_prob, exists, bbox|None, localizer_score}
-
-    sweep_threshold(siamese_ckpt, localizer_ckpt, *, eval_split="test",
-                    thresholds=(...), **eval_kwargs)
-        -> dict per threshold of {fpr, fnr, accuracy, map_50_when_exists}
-"""
 
 from __future__ import annotations
 
@@ -38,7 +18,6 @@ from model_shared.dataset import _letterbox
 from model_shared.analytics import write_json
 from model_shared.runtime import gpu_cleanup_on_exit
 
-
 def _next_run_dir(out_root: Path) -> Path:
     out_root.mkdir(parents=True, exist_ok=True)
     n = 1
@@ -47,7 +26,6 @@ def _next_run_dir(out_root: Path) -> Path:
     p = out_root / f"{n:04d}"
     p.mkdir()
     return p
-
 
 def _draw_bbox(img: Image.Image, bbox_xyxy, *,
                color=(0, 255, 0), thickness=4, caption=None):
@@ -60,7 +38,6 @@ def _draw_bbox(img: Image.Image, bbox_xyxy, *,
         draw.rectangle([x1, max(0, y1 - 28), x1 + 8 * len(caption), y1], fill=color)
         draw.text((x1 + 2, max(0, y1 - 24)), caption, fill=(0, 0, 0))
     return out
-
 
 def _prep_inputs(
     support_paths: list[str | Path], query_path: str | Path,
@@ -84,7 +61,6 @@ def _prep_inputs(
     return sup_t, mask, qry_t, qry_pil, {"nw": nw, "nh": nh, "q_scale": q_scale,
                                           "q_pl": q_pl, "q_pt": q_pt, "K": K}
 
-
 def _bbox_to_native(cx, cy, w, h, *, img_size, q_scale, q_pl, q_pt, nw, nh):
     x1 = (cx - w / 2) * img_size
     y1 = (cy - h / 2) * img_size
@@ -97,7 +73,6 @@ def _bbox_to_native(cx, cy, w, h, *, img_size, q_scale, q_pl, q_pt, nw, nh):
         max(0.0, min(nh, (y2 - q_pt) / q_scale)),
     ]
 
-
 def run_combined(
     siamese_ckpt: str | Path,
     localizer_ckpt: str | Path,
@@ -105,7 +80,7 @@ def run_combined(
     query_path: str | Path,
     *,
     existence_threshold: float | None = None,
-    existence_threshold_mode: str = "hard",   # "hard" | "soft" | "always_localize"
+    existence_threshold_mode: str = "hard",
     siamese_img_size: int = 518,
     localizer_img_size: int = 768,
     abstain_threshold: float = 0.5,
@@ -115,18 +90,6 @@ def run_combined(
     bbox_thickness: int = 4,
     smoke: bool = False,
 ) -> dict[str, Any]:
-    """Cascaded siamese → localizer inference.
-
-    Threshold defaulting:
-      - ``existence_threshold=None`` (default): read ``learned_threshold`` from
-        the siamese checkpoint (median val best_f1_threshold across training).
-        This is the calibrated operating point that fixes the previous
-        "tp=0 because 0.5 was never crossed" bug.
-      - Pass a float to override.
-
-    The localizer's own abstain channel (``bg_prob``) is ALSO surfaced and an
-    abstain decision is reported per query.
-    """
     with gpu_cleanup_on_exit(verbose=False), torch.no_grad():
         return _run_combined_inner(
             siamese_ckpt=siamese_ckpt, localizer_ckpt=localizer_ckpt,
@@ -140,7 +103,6 @@ def run_combined(
             bbox_color=bbox_color, bbox_thickness=bbox_thickness,
             smoke=smoke,
         )
-
 
 def _run_combined_inner(
     *,
@@ -197,7 +159,6 @@ def _run_combined_inner(
     siamese = _build_siamese(sia_ckpt, k_max=sia_k).to(device_t).eval()
     localizer = _build_localizer(loc_ckpt, k_max=loc_k, img_size=localizer_img_size).to(device_t).eval()
 
-    # Siamese forward.
     sia_sup, sia_mask, sia_qry, qry_pil, _ = _prep_inputs(
         support_paths, query_path, img_size=siamese_img_size,
         k_max=sia_k, device=device_t,
@@ -242,7 +203,7 @@ def _run_combined_inner(
         )
         annotated.save(str(out_dir / "result.png"))
     else:
-        # Save query annotated with NOT EXISTS caption.
+
         annotated = _draw_bbox(
             qry_pil, (5, 5, qry_pil.size[0] - 5, qry_pil.size[1] - 5),
             color=(255, 0, 0), thickness=2,
@@ -275,12 +236,6 @@ def _run_combined_inner(
           f"→  {out_dir}")
     return payload
 
-
-# ---------------------------------------------------------------------------
-# Threshold sweep against the test split
-# ---------------------------------------------------------------------------
-
-
 def sweep_threshold(
     siamese_ckpt: str | Path,
     localizer_ckpt: str | Path,
@@ -299,13 +254,6 @@ def sweep_threshold(
     device: str | None = None,
     analysis_root: str = "model_analysis",
 ) -> dict[str, Any]:
-    """Run BOTH models on the test split, then sweep cascade thresholds.
-
-    Computes per-threshold:
-        FPR, FNR, accuracy   (siamese-driven binary)
-        map_50_at_threshold  (mAP@50 of localizer over episodes the siamese
-                              passed through, gated by existence score)
-    """
     with gpu_cleanup_on_exit(verbose=False), torch.no_grad():
         return _sweep_threshold_inner(
             siamese_ckpt=siamese_ckpt, localizer_ckpt=localizer_ckpt,
@@ -317,7 +265,6 @@ def sweep_threshold(
             k_min=k_min, k_max=k_max, device=device,
             analysis_root=analysis_root,
         )
-
 
 def _sweep_threshold_inner(
     *,
@@ -348,7 +295,6 @@ def _sweep_threshold_inner(
         k_min=k_min, k_max=k_max,
     )
 
-    # Collect per-episode predictions.
     sia_records: list[dict] = []
     for batch in sia_loader:
         sup = batch["support_imgs"].to(device_t)
@@ -381,7 +327,6 @@ def _sweep_threshold_inner(
             loc_scores.append(float(out["best_score"][i].cpu().item()))
             loc_present.append(bool(is_present[i].item()))
 
-    # Sweep.
     results: dict[str, dict[str, float]] = {}
     n = len(sia_records)
     for thr in thresholds:
@@ -401,7 +346,7 @@ def _sweep_threshold_inner(
         fpr = fp / max(n_neg, 1)
         fnr = fn / max(n_pos, 1)
         acc = (tp + tn) / max(n, 1)
-        # map@50 over positives that passed siamese gating.
+
         kept_iou: list[tuple[float, bool]] = []
         for r, iou, sc in zip(sia_records, loc_ious, loc_scores):
             if r["is_present"] and r["existence_prob"] >= thr:
@@ -451,7 +396,6 @@ def _sweep_threshold_inner(
         print(f"  {thr:9.2f} | {r['fpr']:.4f} | {r['fnr']:.4f} | {r['accuracy']:.4f} | {r['map_50_when_exists']:.4f}")
     return payload
 
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--siamese-ckpt", required=True)
@@ -477,7 +421,6 @@ def main() -> None:
         device=args.device,
         out_root=args.out_root,
     )
-
 
 if __name__ == "__main__":
     main()

@@ -12,7 +12,6 @@ import (
 	"github.com/pewpewnor/looking-glass/backend/internal/imageutil"
 )
 
-// Store manages the on-disk category / support-image hierarchy.
 type Store struct {
 	dataDir string
 }
@@ -24,8 +23,6 @@ func New(dataDir string) (*Store, error) {
 	return &Store{dataDir: dataDir}, nil
 }
 
-// SaveCroppedImage saves img as JPEG under data/categories/{categoryName}/.
-// Returns the relative URL path (/images/categories/{category}/{file}).
 func (s *Store) SaveCroppedImage(categoryName string, img image.Image) (string, error) {
 	dir := s.categoryDir(categoryName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -48,7 +45,6 @@ func (s *Store) SaveCroppedImage(categoryName string, img image.Image) (string, 
 	return "/images/categories/" + categoryName + "/" + filename, nil
 }
 
-// LoadCategoryImages loads all JPEG images stored for a category.
 func (s *Store) LoadCategoryImages(categoryName string) ([]image.Image, error) {
 	dir := s.categoryDir(categoryName)
 	entries, err := os.ReadDir(dir)
@@ -82,7 +78,6 @@ func (s *Store) LoadCategoryImages(categoryName string) ([]image.Image, error) {
 	return imgs, nil
 }
 
-// ListCategories returns all category names that have at least one image.
 func (s *Store) ListCategories() ([]string, error) {
 	base := filepath.Join(s.dataDir, "categories")
 	entries, err := os.ReadDir(base)
@@ -109,7 +104,6 @@ func (s *Store) ListCategories() ([]string, error) {
 	return names, nil
 }
 
-// ListCategoryImageURLs returns the relative URL paths for a category's images.
 func (s *Store) ListCategoryImageURLs(categoryName string) ([]string, error) {
 	dir := s.categoryDir(categoryName)
 	entries, err := os.ReadDir(dir)
@@ -135,8 +129,6 @@ func (s *Store) ListCategoryImageURLs(categoryName string) ([]string, error) {
 	return urls, nil
 }
 
-// CategoryDir returns the absolute path to the directory holding support
-// images for categoryName. The directory is not guaranteed to exist.
 func (s *Store) CategoryDir(name string) string {
 	return s.categoryDir(name)
 }

@@ -28,15 +28,17 @@ job.
   ≈ zero-shot OWLv2 (the mean is exactly what `phase0_forward` uses), and
   the fusion learns a small correction on top. `alpha` is trainable; if the
   fusion is harmful the optimiser will drive `alpha → 0`.
-- **Detection**: query image → `image_embedder` → `class_predictor(prototype)`
-  → argmax patch → `box_predictor[argmax]`. Output `best_box` in `(cx, cy, w, h)`.
+- **Detection**: query image → `image_embedder` →
+  `class_predictor(prototype)` → argmax patch → `box_predictor[argmax]`.
+  Output `best_box` in `(cx, cy, w, h)`.
 
 Loss:
-| Component                    | Definition                                         | Weight |
-| ---------------------------- | -------------------------------------------------- | ------ |
-| `L_patch_ce`                 | cross-entropy on the patch nearest GT centre       | 1.0    |
-| `L_l1`  (L2 / L3 only)       | L1 on `pred_boxes[argmax]` vs GT (cxcywh)          | 5.0    |
-| `L_giou` (L2 / L3 only)      | GIoU on `pred_boxes[argmax]` vs GT (xyxy)          | 2.0    |
+
+- `L_patch_ce`: cross-entropy on the patch nearest GT centre; weight 1.0.
+- `L_l1` (L2/L3 only): L1 on the selected box versus GT `(cx, cy, w, h)`;
+  weight 5.0.
+- `L_giou` (L2/L3 only): GIoU on the selected box versus GT
+  `(x1, y1, x2, y2)`; weight 2.0.
 
 The patch-CE term replaces the previous "soft-box" trick. It directly demands
 prototype DISCRIMINATION across patches (the prototype must produce a high
@@ -45,11 +47,12 @@ logit on the patch nearest the GT centre), so there's no fixed-point
 gradient (frozen box_head) and are skipped to avoid wasted compute.
 
 Stages:
-| Stage | Trainable                             | Loss                          | Epochs | Eps/fold |
-| ----- | ------------------------------------- | ----------------------------- | ------ | -------- |
-| L1    | fusion + CLS + alpha                  | patch_ce only                 | 3      | 400      |
-| L2    | + `class_head` + `box_head` + `layer_norm` | patch_ce + L1 + GIoU     | 12     | 250      |
-| L3    | + LoRA r=8 on `q_proj/v_proj` of last 4 ViT blocks | patch_ce + L1 + GIoU | 8     | 250      |
+
+- `L1`: fusion, CLS, and alpha; patch CE only; 3 epochs, 400 episodes/fold.
+- `L2`: adds class and box heads plus layer norm; patch CE, L1, and GIoU;
+  12 epochs, 250 episodes/fold.
+- `L3`: adds rank-8 LoRA to `q_proj`/`v_proj` in the last four ViT blocks;
+  patch CE, L1, and GIoU; 8 epochs, 250 episodes/fold.
 
 Headline metric: **mAP@50** (over positive episodes only). Per-K and per-source
 breakdowns (K∈{1, 4, 10}; sources hots/insdet) reported every epoch. Plus a
@@ -69,16 +72,18 @@ episodes at ratio 1:3.
   between query and support patches (max, top-5 mean/std, mean, CLS-cosine,
   entropy).
 - **Head MLP**: concatenate `[pooled, q_cls, sup_cls_mean, scalars]` (∼1158-D)
-  → LayerNorm → Linear(.,256) → GELU → Dropout → Linear(256,64) → GELU →
-  Dropout → Linear(64,1) → sigmoid.
+  → LayerNorm → Linear(.,256) → GELU → Dropout → Linear(256,64)
+  → GELU → Dropout → Linear(64,1) → sigmoid.
 
 Stages:
-| Stage | Trainable                                                  | Loss                          | Epochs | Eps/fold |
-| ----- | ---------------------------------------------------------- | ----------------------------- | ------ | -------- |
-| S1    | cross-attn + scalars + head MLP                            | focal + variance + decorrelation | 10  | 400      |
-| S2    | + LoRA r=8 on `query/value` of last 4 DINOv2 blocks        | same                          | 8      | 400      |
+
+- `S1`: cross-attention, scalar features, and head MLP; focal, variance, and
+  decorrelation losses; 10 epochs, 400 episodes/fold.
+- `S2`: adds rank-8 LoRA to `query`/`value` in the last four DINOv2 blocks;
+  same losses; 8 epochs, 400 episodes/fold.
 
 Loss components:
+
 - `focal_BCE(α=0.25, γ=2.0)` — α=0.25 weights NEGATIVES higher, penalising
   false positives more.
 - `variance_reg = relu(0.5 - std_of_pooled_per_dim_across_batch).mean()` —
@@ -100,7 +105,7 @@ directly.
 
 ## 2. Repository Layout
 
-```
+```text
 .
 ├── scripts/                      # standalone dataset, inference, and export tools
 │   ├── aggregator.py             # idempotent dataset builder + --validate
@@ -149,7 +154,8 @@ The same `EpisodeDataset` serves both models. Models pull only the fields they
 need from each batch.
 
 Episode contract:
-```
+
+```text
 support_imgs : (K_max, 3, S, S)   un-normalized RGB; padded slots are zeros.
 support_mask : (K_max,) bool      True for real supports.
 k            : int                actual K used this episode.
@@ -163,15 +169,16 @@ native_size, native_bbox          for inference / debugging.
 Each model normalizes inside its own forward (CLIP vs ImageNet stats).
 
 Support preprocessing policy (**NO bbox cropping at runtime**):
+
 - Letterbox resize (preserve aspect ratio, pad to square with mean colour).
 - Train augmentation: hflip, random-resized-crop scale 0.5–1.0, ColorJitter,
   random grayscale, Gaussian blur, random erasing 5–20% area.
 - Eval/test/phase0: letterbox only.
 
-Query: letterbox + (train) mild ColorJitter. **No** spatial aug (preserves bbox).
+Query: letterbox + mild train ColorJitter. **No** spatial aug (preserves bbox).
 
-K∈{1..10} sampled uniformly per episode at train time. Eval uses a deterministic
-roundrobin over `(k_min, 4, k_max)` so per-K metrics are stable.
+K∈{1..10} is sampled uniformly per episode at train time. Eval uses a
+deterministic round-robin over `(k_min, 4, k_max)` for stable per-K metrics.
 
 Negative episodes (siamese only): query drawn from a different instance of the
 same source. Optional hard-negative cache lookup with probability
@@ -182,15 +189,14 @@ same source. Optional hard-negative cache lookup with probability
 ## 4. Aggregator (`scripts/aggregator.py`)
 
 `schema_version=6`. Idempotent — skips if `dataset/aggregated/manifest.json`
-already exists and validates. Sources used:
+already exists and validates. The sources are:
 
-| Source       | Role             |
-| ------------ | ---------------- |
-| HOTS         | train + test (80/20 stratified) |
-| InsDet       | train + test (80/20 stratified) |
+- HOTS: train and test, with an 80/20 stratified split.
+- InsDet: train and test, with an 80/20 stratified split.
 
 CLI:
-```
+
+```bash
 uv run python -m scripts.aggregator            # build (idempotent)
 uv run python -m scripts.aggregator --force    # rebuild from scratch
 uv run python -m scripts.aggregator --validate # only validate
@@ -221,6 +227,7 @@ Single payload format per `*.pt` file:
 ```
 
 Resume rules:
+
 - `resume=True` → load `<out_dir>/last.pt` if present.
 - `resume=False` → fresh start.
 - `resume=<str>` → resolve as path.
@@ -230,6 +237,7 @@ Cross-stage warm-start: when entering a new stage, the previous stage's
 rebuilt for the new stage.
 
 Files written per stage:
+
 - `ckpt_fold{F}_epoch{E:03d}.pt` — every per-(epoch, fold) snapshot.
 - `last.pt` — atomic alias to the latest write.
 - `best.pt` — atomic alias when val metric improves.
@@ -269,8 +277,10 @@ returns, and is visible from the Drive web UI within seconds.
 ## 6. Smoke Test (`model_shared/smoke.py`)
 
 `smoke_test(seconds_budget=60)` covers:
+
 1. `aggregator.validate(strict=True)`.
-2. Localizer Phase 0 + L1/L2/L3 (1 epoch × 1 fold × 4 episodes × img=224 × K_max=2).
+2. Localizer Phase 0 + L1/L2/L3 (1 epoch × 1 fold × 4 episodes;
+   img=224 × K_max=2).
 3. Localizer `evaluate_run` on each stage's `stage_complete.pt`.
 4. Siamese Phase 0 + S1/S2 (same shape).
 5. Siamese `evaluate_run` on each stage.
@@ -279,11 +289,12 @@ returns, and is visible from the Drive web UI within seconds.
 8. Localizer L3 checkpoint reload roundtrip.
 
 Every train/evaluate function accepts `smoke=True` to dial down to the tiny
-config. All artifacts go under `checkpoints/_smoke/` and `model_analysis/_smoke/`
-and are wiped at the end (unless `cleanup=False`).
+config. All artifacts go under `checkpoints/_smoke/` and
+`model_analysis/_smoke/` and are wiped at the end (unless `cleanup=False`).
 
 CLI:
-```
+
+```bash
 uv run python -m model_shared.smoke --seconds-budget 60
 ```
 
@@ -310,6 +321,7 @@ run_combined(
 ```
 
 Modes:
+
 - **`"hard"`** (default) — siamese first. If `existence_prob < threshold`,
   return `{exists: False, bbox: None}` and skip the localizer. Else run the
   localizer.
@@ -319,6 +331,7 @@ Modes:
   existence_prob, regardless of threshold.
 
 Threshold sweep against the test split:
+
 ```python
 sweep_threshold(
     siamese_ckpt, localizer_ckpt, *,
@@ -326,14 +339,15 @@ sweep_threshold(
     thresholds=(0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70),
 )
 ```
-Writes `model_analysis/combined/threshold_sweep_<ts>.json` and prints the FPR / FNR
-/ accuracy / mAP@50-on-passed-positives Pareto curve.
+
+Writes `model_analysis/combined/threshold_sweep_<ts>.json` and prints the FPR /
+FNR / accuracy / mAP@50-on-passed-positives Pareto curve.
 
 ---
 
 ## 8. Notebook Layout (`notebooks/modeling.ipynb`)
 
-```
+```text
 # Two-Model Few-Shot System
 %autoreload setup
 USE_GOOGLE_COLAB / paths
@@ -374,6 +388,7 @@ default. `smoke=True` applies a tiny-config override layer that explicit
 kwargs still override.
 
 Categories of knobs (full list in the source files):
+
 - **I/O**: manifest, data_root, out_root, analysis_root.
 - **Hardware**: img_size, batch_size, grad_accum_steps, num_workers, use_amp,
   device.
@@ -407,13 +422,11 @@ Categories of knobs (full list in the source files):
 
 ## 10. Success Criteria
 
-| Metric                                    | Target              |
-| ----------------------------------------- | ------------------- |
-| Localizer InsDet mAP@50                   | ≥ 20%               |
-| Localizer HOTS mAP@50                     | ≥ 30%               |
-| Multi-shot scaling                        | mAP@50(K=10) > mAP@50(K=1) |
-| Siamese AUROC                             | ≥ 0.80 overall      |
-| Siamese FPR @ thr=0.5                     | ≤ 10%               |
-| No representation collapse                | pooled std > 0.1 per dim |
-| Resumability                              | full coverage       |
-| Smoke test                                | < 60s wall clock    |
+- Localizer InsDet mAP@50: ≥ 20%.
+- Localizer HOTS mAP@50: ≥ 30%.
+- Multi-shot scaling: mAP@50(K=10) > mAP@50(K=1).
+- Siamese AUROC: ≥ 0.80 overall.
+- Siamese FPR at threshold 0.5: ≤ 10%.
+- No representation collapse: pooled standard deviation > 0.1 per dimension.
+- Resumability: full coverage.
+- Smoke test: < 60 seconds wall clock.

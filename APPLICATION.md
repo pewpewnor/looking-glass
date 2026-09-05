@@ -32,17 +32,27 @@ avoids reloading the localizer for every camera query.
 
 ## Technology stack
 
-| Area | Technology | Responsibility |
-| --- | --- | --- |
-| Mobile client | Flutter / Dart | Cross-platform UI, camera capture, category management, and result display. |
-| Client navigation and state | Material 3, `go_router`, `provider`, `shared_preferences` | Routes, app settings state, and persistence of the backend URL and thresholds. |
-| Client device and network APIs | `camera`, `image_picker`, `permission_handler`, `http` | Camera access, support-photo capture, permissions, and multipart REST requests. |
-| Backend API | Go 1.25.4, Gin, Gin CORS | HTTP endpoints, validation, static image serving, and request handling. |
-| Backend image processing | `imaging`, `gg`, `goexif` | Resize/crop operations, result annotation, and EXIF orientation correction. |
-| Go inference runtime | `github.com/yalue/onnxruntime_go` | Loads and executes the RMBG and Siamese ONNX graphs. |
-| Python inference runtime | Python, `onnxruntime-gpu`, NumPy, Pillow | Runs the localizer graph in the persistent worker process. |
-| Model stack | RMBG-1.4, DINOv2-small, OWLv2 | Salient-object preprocessing, existence classification, and localization. |
-| Android packaging | Docker + Flutter Android toolchain | Reproducible release APK builds using `app/Dockerfile`. |
+The stack is split into these areas:
+
+- **Mobile client:** Flutter/Dart for the cross-platform UI, camera capture,
+  category management, and result display.
+- **Client state:** Material 3, `go_router`, `provider`, and
+  `shared_preferences` for routes, settings, and persistence.
+- **Device and network APIs:** `camera`, `image_picker`,
+  `permission_handler`, and `http` for capture, permissions, and multipart
+  requests.
+- **Backend API:** Go 1.25.4, Gin, and Gin CORS for endpoints, validation,
+  image serving, and request handling.
+- **Image processing:** `imaging`, `gg`, and `goexif` for resize, crop,
+  annotation, and EXIF orientation correction.
+- **Go inference:** `github.com/yalue/onnxruntime_go` loads the RMBG and
+  Siamese ONNX graphs.
+- **Python inference:** Python, `onnxruntime-gpu`, NumPy, and Pillow run the
+  localizer graph in the persistent worker.
+- **Model stack:** RMBG-1.4, DINOv2-small, and OWLv2 provide preprocessing,
+  existence classification, and localization.
+- **Android packaging:** Docker and the Flutter Android toolchain produce
+  reproducible release APKs using `app/Dockerfile`.
 
 The Python training environment uses PyTorch, TorchVision, Transformers, PEFT,
 ONNX tooling, and TensorFlow/Lite tooling. Those dependencies are declared in
@@ -178,7 +188,7 @@ the number of images actually saved.
 | `category_name` | Yes | Category whose stored support images should be used. |
 | `query_image` | Yes | The new scene image. |
 | `siamese_threshold` | No | Existence threshold; defaults to `config.json`. |
-| `localizer_abstain_threshold` | No | Background/abstain threshold; defaults to `config.json`. |
+| `localizer_abstain_threshold` | No | Configured background threshold. |
 
 The query path is:
 
@@ -299,12 +309,12 @@ The important fields in `backend/config.json` are:
 | `server.port` | `8080` | HTTP listen port. |
 | `models.rmbg_path` | `../models/rmbg.onnx` | RMBG model path. |
 | `models.siamese_path` | `../models/siamese.onnx` | Siamese model path. |
-| `models.localizer_path` | `../models/localizer.onnx` | Localizer model path passed to the worker. |
+| `models.localizer_path` | `../models/localizer.onnx` | Worker model. |
 | `thresholds.siamese_existence` | `0.4597` | Gate before localizer inference. |
-| `thresholds.localizer_abstain` | `0.5` | Suppress low-confidence localizer results. |
+| `thresholds.localizer_abstain` | `0.5` | Localizer abstain threshold. |
 | `data_dir` | `./data` | Stored support images. |
-| `ort_lib_path` | empty | Optional explicit Go ONNX Runtime shared-library path. |
-| `cuda.enabled` | `true` | Enable the Go CUDA execution provider when available. |
+| `ort_lib_path` | empty | Optional Go ONNX Runtime library path. |
+| `cuda.enabled` | `true` | Enable Go CUDA when available. |
 | `cuda.device_id` | `0` | CUDA device used by the Go sessions and worker. |
 | `localizer.python_path` | `python3.14` | Python executable for the worker. |
 | `localizer.script_path` | `./scripts/localizer_worker.py` | Worker script. |

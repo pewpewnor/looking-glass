@@ -1,4 +1,3 @@
-"""Inner training loop for the localizer (one full sweep)."""
 
 from __future__ import annotations
 
@@ -10,9 +9,7 @@ from torch.utils.data import DataLoader
 from model_localizer.loss import total_loss
 from model_localizer.model import MultiShotLocalizer
 
-
 _RUNNING_KEYS = ("loss", "patch_ce", "l1", "giou", "log_area", "grad_norm")
-
 
 def train_one_pass(
     *,
@@ -28,11 +25,6 @@ def train_one_pass(
     progress: bool = True,
     progress_every: int = 10,
 ) -> dict[str, float]:
-    """Run one training pass.
-
-    use_box_loss : suppress L1+GIoU+log_area. At L1 the box_head is frozen so
-                   those terms produce zero gradient and are pure overhead.
-    """
     model.train()
     if not any(p.requires_grad for p in model.owlv2.parameters()):
         try:
@@ -147,7 +139,7 @@ def train_one_pass(
     running["n_steps"] = n_batches
     running["grad_steps"] = grad_steps
     running["grad_nan_steps"] = grad_nan_steps
-    # Snapshot trainable scalars.
+
     try:
         running["alpha"] = float(model.alpha.detach().item())
     except AttributeError:

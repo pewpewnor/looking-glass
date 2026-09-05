@@ -148,11 +148,12 @@ The default combined mode is a hard cascade:
 
 Two additional modes are available for analysis and product behavior:
 
-| Mode | Behavior |
-| --- | --- |
-| `hard` | Gate localization on the Siamese threshold. |
-| `soft` | Always run both models and mark the box as low-confidence below the threshold. |
-| `always_localize` | Always return the localizer box together with the Siamese score. |
+The modes are:
+
+- `hard`: gate localization on the Siamese threshold.
+- `soft`: always run both models and mark low-confidence boxes below the
+  threshold.
+- `always_localize`: always return the localizer box with the Siamese score.
 
 The threshold can be swept on the test split to study the trade-off between
 false positives, false negatives, and localization quality.
@@ -188,12 +189,15 @@ versa.
 The localizer is trained only on positive episodes because the Siamese model
 owns the existence decision.
 
-| Stage | Trainable components | Main purpose |
-| --- | --- | --- |
-| Phase 0 | No fine-tuning | Establish the zero-shot OWLv2 baseline. |
-| L1 | Support fusion, `[CLS]`, and `alpha` | Learn how to combine multiple support examples using patch classification loss. |
-| L2 | L1 components plus class head, box head, and layer normalization | Add direct box regression with L1 and GIoU losses. |
-| L3 | L2 components plus LoRA adapters in the last four OWLv2 blocks | Adapt selected backbone attention projections while keeping most of OWLv2 frozen. |
+The stages are:
+
+- **Phase 0:** no fine-tuning; establish the zero-shot OWLv2 baseline.
+- **L1:** train support fusion, `[CLS]`, and `alpha` with patch
+  classification loss.
+- **L2:** add class and box heads plus layer normalization for direct box
+  regression with L1 and GIoU losses.
+- **L3:** add LoRA adapters to the last four OWLv2 blocks while keeping most
+  of OWLv2 frozen.
 
 The localization objective is:
 
@@ -210,11 +214,13 @@ assigns similar scores everywhere.
 The Siamese model is trained on positive and negative episodes, with a
 default ratio of one positive to three negatives.
 
-| Stage | Trainable components | Main purpose |
-| --- | --- | --- |
-| Phase 0 | No fine-tuning | Establish the frozen DINOv2 baseline. |
-| S1 | Cross-attention pool, similarity features, and MLP head | Learn the existence decision from frozen visual features. |
-| S2 | S1 components plus LoRA adapters in the last four DINOv2 blocks | Adapt selected query/value projections for the task. |
+The stages are:
+
+- **Phase 0:** no fine-tuning; establish the frozen DINOv2 baseline.
+- **S1:** train the cross-attention pool, similarity features, and MLP head
+  for the existence decision.
+- **S2:** add LoRA adapters to the last four DINOv2 blocks for selected
+  query/value projections.
 
 The Siamese objective combines:
 
@@ -230,14 +236,15 @@ difficult scenes instead of repeatedly seeing only easy examples.
 
 ## Dataset and episode construction
 
-The training data is aggregated into a validated manifest with schema version
-6. The current sources are:
+The training data is aggregated into a validated schema-version-6 manifest.
+The current sources are:
 
-| Dataset | Use |
-| --- | --- |
-| [HOTS](https://github.com/gtziafas/HOTS) | Training and testing for household objects in tabletop scenes. |
-| [InsDet](https://insdet.github.io) | Training and testing for instance detection. |
-| [VizWiz Fewshot](https://vizwiz.org/tasks-and-datasets/object-localization) | Localizer Phase 0 only, as a baseline source. |
+- [HOTS](https://github.com/gtziafas/HOTS): training and testing for
+  household objects in tabletop scenes.
+- [InsDet](https://insdet.github.io): training and testing for instance
+  detection.
+- [VizWiz Fewshot](https://vizwiz.org/tasks-and-datasets/object-localization):
+  Localizer Phase 0 only, as a baseline source.
 
 HOTS and InsDet are split into train and test partitions using an 80/20
 stratified split. Training episodes sample a variable number of support
