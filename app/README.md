@@ -1,140 +1,105 @@
-# Looking Glass
+# Looking Glass app
 
-Object-finding mobile app backed by a three-model ONNX pipeline (RMBG-1.4 salient crop → Siamese existence check → multi-shot localizer).
+This directory contains the Flutter client for Looking Glass. The client
+creates object categories from reference photos, captures query scenes, and
+displays the result returned by the Go backend.
 
----
+The backend and model-development documentation are linked from the
+[repository README](../README.md).
 
-## Project layout
+## App layout
 
+```text
+app/
+├── lib/
+│   ├── config/       Persistent server and threshold settings
+│   ├── models/       Client-side data models
+│   ├── pages/        Category, camera, and settings screens
+│   ├── services/     Backend API client
+│   └── widgets/      Shared UI components
+├── android/          Android runner
+├── ios/              iOS runner
+├── linux/             Linux runner
+├── macos/             macOS runner
+├── web/               Web runner
+└── windows/           Windows runner
 ```
-iss_group_24_app/
-├── models/               Pre-trained ONNX models (rmbg, siamese, localizer)
-├── backend/              Go REST API server
-│   ├── cmd/server/       Entry point (main.go)
-│   ├── internal/         inference, imageutil, storage, api packages
-│   ├── config.json       Server config (port, model paths, thresholds)
-│   └── data/             Stored support images (auto-created at runtime)
-└── looking_glass_app/    Flutter Android app
-```
 
----
+## Run locally
 
-## Running the backend
-
-### Prerequisites
-
-| Tool | Version |
-|------|---------|
-| Go   | 1.25+   |
-| ONNX Runtime (C shared library) | 1.19+ |
-
-### 1 — Install ONNX Runtime
-
-Download the Linux x64 tarball from the [ONNX Runtime releases page](https://github.com/microsoft/onnxruntime/releases) and extract it into the repo root:
+From the repository root:
 
 ```bash
-# Example with v1.26.0 — adjust the version number as needed
-tar -xzf onnxruntime-linux-x64-1.26.0.tgz
-mv onnxruntime-linux-x64-1.26.0 onnxruntime
+cd app
+flutter pub get
+flutter run
 ```
 
-The Go binding (`yalue/onnxruntime_go`) looks for the bare name `onnxruntime.so`, but the release tarball ships `libonnxruntime.so`. Create a symlink so both names resolve:
+The app needs a running backend. Open **Settings**, enter the backend URL
+(for example, `http://192.168.1.10:8080` on a local network), and save the
+settings.
 
-```bash
-ln -s libonnxruntime.so onnxruntime/lib/onnxruntime.so
-```
+## Backend setup
 
-Then expose the library directory to the dynamic linker:
-
-```bash
-export LD_LIBRARY_PATH=$PWD/onnxruntime/lib:$LD_LIBRARY_PATH
-```
-
-> This `export` only lasts for the current shell session. Add it to `~/.bashrc` / `~/.zshrc` to make it permanent, or prepend it to the `go run` command each time.
-
-### 2 — Configure
-
-Edit `backend/config.json` to adjust thresholds or paths if needed:
-
-```json
-{
-  "server":     { "port": 8080 },
-  "models": {
-    "rmbg_path":      "../models/rmbg.onnx",
-    "siamese_path":   "../models/siamese.onnx",
-    "localizer_path": "../models/localizer.onnx"
-  },
-  "thresholds": {
-    "siamese_existence": 0.4597,
-    "localizer_abstain": 0.5
-  },
-  "data_dir":    "./data",
-  "ort_lib_path": ""
-}
-```
-
-### 3 — Run
+The Go service is in [`../backend`](../backend). Run it from that directory so
+the relative paths in `config.json` resolve correctly:
 
 ```bash
 cd backend
 go run ./cmd/server
 ```
 
-The server starts on the configured port (default **8080**).  
-Model loading takes a few seconds on first start.
+Place the exported ONNX files in the ignored root-level `models/` directory:
 
-To pass a different config file:
-
-```bash
-go run ./cmd/server /path/to/config.json
+```text
+models/
+├── rmbg.onnx
+├── siamese.onnx
+└── localizer.onnx
 ```
 
----
+See `backend/config.json` for thresholds, data storage, CUDA, and localizer
+worker settings. The backend stores uploaded category images in
+`backend/data/`.
 
-## Exporting the Android APK
+### ONNX Runtime
 
-The Flutter app is built entirely inside Docker — no local Flutter or Android SDK installation needed.
+The backend requires the ONNX Runtime shared library. Download the Linux x64
+release from the [ONNX Runtime releases page](https://github.com/microsoft/onnxruntime/releases),
+extract it at the repository root, and expose its library directory:
 
-### Prerequisites
+```bash
+tar -xzf onnxruntime-linux-x64-<version>.tgz
+mv onnxruntime-linux-x64-<version> onnxruntime
+ln -s libonnxruntime.so onnxruntime/lib/onnxruntime.so
+export LD_LIBRARY_PATH="$PWD/onnxruntime/lib:$LD_LIBRARY_PATH"
+```
 
-- [Docker](https://docs.docker.com/get-docker/) with **BuildKit** enabled (Docker 23+ enables it by default)
+## Build the Android APK
 
-### Build and export
-
-Run this from the **repository root**:
+The Docker build includes Flutter and the Android toolchain. Run it from the
+repository root:
 
 ```bash
 docker build \
   --target=export \
   --output=./apk \
-  looking_glass_app/
+  app/
 ```
 
-When the build finishes, the APK is at:
-
-```
-apk/looking_glass_app.apk
-```
-
-Transfer it to your phone and install it (you may need to allow installation from unknown sources in Android settings).
-
-> **Note:** The first build downloads the base image and all Flutter/Gradle dependencies — expect 10–20 minutes. Subsequent builds reuse the Docker layer cache and finish in 2–5 minutes.
-
-### Install on device via ADB
-
-If your phone is connected via USB with USB debugging enabled:
+The resulting APK is `apk/looking_glass_app.apk`. Install it on a connected
+Android device with:
 
 ```bash
 adb install apk/looking_glass_app.apk
 ```
 
----
+## First-time use
 
-## App first-time setup
+1. Set the backend URL in **Settings**.
+2. Open **Categories** and create a category.
+3. Capture one to ten reference photos and save the category.
+4. Open **Find Object**, choose the category, and capture a scene.
 
-1. Open the app and go to **Settings** (bottom nav).
-2. Set **Server URL** to the machine running the backend, e.g. `http://192.168.1.10:8080`. Both devices must be on the same network.
-3. Adjust the **Siamese** and **Localizer abstain** thresholds if needed.
-4. Tap **Save Settings**.
-5. Go to **Categories → + New Category**, capture 1–10 photos of the target object, name the category, and tap **Save**.
-6. Go to **Find Object**, select the category, start the camera, and tap the shutter button to search.
+The app sends the reference photos and query image to the backend. The
+backend returns an existence score and, when appropriate, a bounding box.
