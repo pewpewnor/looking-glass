@@ -1,18 +1,3 @@
-"""Siamese-only inference (existence prediction).
-
-CLI:
-    python -m scripts.inference_siamese \
-        --checkpoint checkpoints/siamese/S2/stage_complete.pt \
-        --supports s1.jpg s2.jpg s3.jpg s4.jpg \
-        --query    scene.jpg \
-        --threshold 0.5
-
-Public API:
-    run_siamese(checkpoint, support_paths, query_path, *, threshold=0.5,
-                img_size=518, device=None, out_root="inference/siamese",
-                smoke=False)
-        -> dict {existence_prob, exists}
-"""
 
 from __future__ import annotations
 
@@ -30,7 +15,6 @@ from model_shared.checkpoint import load_trainable_state
 from model_shared.dataset import _letterbox
 from model_siamese.model import MultiShotSiamese
 
-
 def _next_run_dir(out_root: Path) -> Path:
     out_root.mkdir(parents=True, exist_ok=True)
     n = 1
@@ -39,7 +23,6 @@ def _next_run_dir(out_root: Path) -> Path:
     p = out_root / f"{n:04d}"
     p.mkdir()
     return p
-
 
 def _build_model_from_ckpt(ckpt: dict, *, k_max: int) -> MultiShotSiamese:
     cfg = ckpt.get("config", {})
@@ -62,7 +45,6 @@ def _build_model_from_ckpt(ckpt: dict, *, k_max: int) -> MultiShotSiamese:
         )
     load_trainable_state(m, ckpt.get("state_dict", {}))
     return m
-
 
 @torch.no_grad()
 def run_siamese(
@@ -137,7 +119,6 @@ def run_siamese(
     print(f"[siamese] existence_prob={prob:.4f}  exists={exists}  →  {out_dir}")
     return payload
 
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -157,7 +138,6 @@ def main() -> None:
         device=args.device,
         out_root=args.out_root,
     )
-
 
 if __name__ == "__main__":
     main()

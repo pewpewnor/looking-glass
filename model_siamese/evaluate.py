@@ -1,38 +1,3 @@
-"""Siamese evaluation: comprehensive existence-classification metrics.
-
-Reports per (overall, per_source, per_k) bucket:
-
-  Counts:
-    n, n_pos, n_neg
-
-  Threshold-dependent (using the user-supplied ``threshold``, default 0.5):
-    accuracy, acc_pos, acc_neg
-    precision, recall, f1
-    fpr, fnr, tpr (= 1 - fnr), tnr (= 1 - fpr)
-    youden_j  (tpr - fpr; max=1, random=0)
-    mcc       (Matthews correlation coefficient — robust to class imbalance)
-
-  Threshold-free:
-    auroc                 (Mann-Whitney U)
-    pr_auc                (precision-recall AUC, trapezoidal)
-    avg_precision         (interpolated AP @ 101 points)
-    brier                 (Brier score: mean squared error vs ground truth)
-
-  Threshold sweep summaries:
-    best_f1               (max F1 over ALL operating thresholds)
-    best_f1_threshold     (threshold that achieves best_f1)
-    fpr_at_recall_95      (FPR when recall = 0.95)
-    recall_at_fpr_05      (recall when FPR = 0.05)
-    recall_at_fpr_10      (recall when FPR = 0.10)
-
-  Score distribution:
-    mean_score_pos / neg, std_score_pos / neg
-    score_gap                   (mean_score_pos - mean_score_neg)
-    median_score_pos / neg
-    frac_high_score             (score > 0.9)
-    frac_low_score              (score < 0.1)
-    frac_uncertain              (0.4 <= score < 0.6)
-"""
 
 from __future__ import annotations
 
@@ -46,22 +11,14 @@ from torch.utils.data import DataLoader
 
 from model_siamese.model import MultiShotSiamese
 
-
-# ---------------------------------------------------------------------------
-# Stat helpers
-# ---------------------------------------------------------------------------
-
-
 def _safe_mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
-
 
 def _safe_std(xs: list[float]) -> float:
     if len(xs) < 2:
         return 0.0
     m = _safe_mean(xs)
     return (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
-
 
 def _quantile(values: list[float], q: float) -> float:
     if not values:
@@ -76,12 +33,6 @@ def _quantile(values: list[float], q: float) -> float:
         return s[lo]
     frac = pos - lo
     return s[lo] * (1 - frac) + s[hi] * frac
-
-
-# ---------------------------------------------------------------------------
-# Threshold-free classification metrics
-# ---------------------------------------------------------------------------
-
 
 def _binary_auroc(scores: list[float], labels: list[bool]) -> float:
     pos = [s for s, y in zip(scores, labels) if y]
@@ -106,9 +57,7 @@ def _binary_auroc(scores: list[float], labels: list[bool]) -> float:
     u = sum_pos_ranks - n_pos * (n_pos + 1) / 2.0
     return u / (n_pos * n_neg)
 
-
 def _binary_pr_auc(scores: list[float], labels: list[bool]) -> float:
-    """Trapezoidal area under the precision-recall curve."""
     if not labels or not any(labels):
         return 0.0
     order = sorted(range(len(scores)), key=lambda i: -scores[i])
@@ -130,9 +79,7 @@ def _binary_pr_auc(scores: list[float], labels: list[bool]) -> float:
         prev_r = r
     return auc
 
-
 def _avg_precision_101(scores: list[float], labels: list[bool]) -> float:
-    """101-point interpolated AP (matches the localizer's mAP convention)."""
     if not labels or not any(labels):
         return 0.0
     n_pos = sum(labels)
@@ -159,9 +106,7 @@ def _avg_precision_101(scores: list[float], labels: list[bool]) -> float:
         ap += precs[j] if j < len(precs) else 0.0
     return ap / 101.0
 
-
 def _best_f1(scores: list[float], labels: list[bool]) -> tuple[float, float]:
-    """Return (best_f1, threshold_at_best_f1) over all sweep points."""
     if not labels or not any(labels):
         return 0.0, 0.5
     n_pos = sum(labels)
@@ -188,12 +133,7 @@ def _best_f1(scores: list[float], labels: list[bool]) -> tuple[float, float]:
             last_score = s
     return best_f1, best_thr
 
-
 def _fpr_at_recall(scores: list[float], labels: list[bool], target_recall: float) -> float:
-    """FPR (= FP / N_neg) at the lowest threshold that achieves >= target_recall.
-
-    Returns 1.0 if target_recall is unreachable.
-    """
     if not labels or not any(labels):
         return 1.0
     n_pos = sum(labels)
@@ -211,9 +151,7 @@ def _fpr_at_recall(scores: list[float], labels: list[bool], target_recall: float
             return fp / n_neg
     return 1.0
 
-
 def _recall_at_fpr(scores: list[float], labels: list[bool], target_fpr: float) -> float:
-    """Highest recall achievable while FPR <= target_fpr."""
     if not labels or not any(labels):
         return 0.0
     n_pos = sum(labels)
@@ -234,7 +172,6 @@ def _recall_at_fpr(scores: list[float], labels: list[bool], target_fpr: float) -
             best_recall = max(best_recall, tp / n_pos)
     return best_recall
 
-
 def _matthews_corrcoef(tp: int, fp: int, fn: int, tn: int) -> float:
     num = tp * tn - fp * fn
     den_sq = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
@@ -242,15 +179,8 @@ def _matthews_corrcoef(tp: int, fp: int, fn: int, tn: int) -> float:
         return 0.0
     return num / math.sqrt(den_sq)
 
-
-# ---------------------------------------------------------------------------
-# Bucket
-# ---------------------------------------------------------------------------
-
-
 def _empty_bucket() -> dict[str, list]:
     return {"score": [], "is_present": []}
-
 
 def _bucket_metrics(b: dict[str, list], thr: float = 0.5) -> dict[str, Any]:
     n = len(b["score"])
@@ -263,7 +193,6 @@ def _bucket_metrics(b: dict[str, list], thr: float = 0.5) -> dict[str, Any]:
     scores = b["score"]
     labels = b["is_present"]
 
-    # ── Threshold-dependent ──────────────────────────────────────────────
     pred_pos = [s > thr for s in scores]
     tp = sum(1 for pp, p in zip(pred_pos, labels) if pp and p)
     fp = sum(1 for pp, p in zip(pred_pos, labels) if pp and not p)
@@ -291,7 +220,6 @@ def _bucket_metrics(b: dict[str, list], thr: float = 0.5) -> dict[str, Any]:
     out["youden_j"] = out["tpr"] - out["fpr"]
     out["mcc"] = _matthews_corrcoef(tp, fp, fn, tn)
 
-    # ── Threshold-free ──────────────────────────────────────────────────
     out["auroc"]         = _binary_auroc(scores, labels)
     out["pr_auc"]        = _binary_pr_auc(scores, labels)
     out["avg_precision"] = _avg_precision_101(scores, labels)
@@ -299,7 +227,6 @@ def _bucket_metrics(b: dict[str, list], thr: float = 0.5) -> dict[str, Any]:
         [(s - (1.0 if p else 0.0)) ** 2 for s, p in zip(scores, labels)]
     )
 
-    # ── Threshold sweep summaries ───────────────────────────────────────
     best_f1, best_thr = _best_f1(scores, labels)
     out["best_f1"]            = best_f1
     out["best_f1_threshold"]  = best_thr
@@ -307,7 +234,6 @@ def _bucket_metrics(b: dict[str, list], thr: float = 0.5) -> dict[str, Any]:
     out["recall_at_fpr_05"]   = _recall_at_fpr(scores, labels, 0.05)
     out["recall_at_fpr_10"]   = _recall_at_fpr(scores, labels, 0.10)
 
-    # ── Score distribution ──────────────────────────────────────────────
     pos_scores = [s for s, p in zip(scores, labels) if p]
     neg_scores = [s for s, p in zip(scores, labels) if not p]
     out["mean_score_pos"]  = _safe_mean(pos_scores)
@@ -323,12 +249,6 @@ def _bucket_metrics(b: dict[str, list], thr: float = 0.5) -> dict[str, Any]:
 
     return out
 
-
-# ---------------------------------------------------------------------------
-# Main evaluator
-# ---------------------------------------------------------------------------
-
-
 @torch.no_grad()
 def evaluate(
     model: MultiShotSiamese,
@@ -341,21 +261,6 @@ def evaluate(
     phase0: bool = False,
     save_scores: bool = True,
 ) -> dict[str, Any]:
-    """Evaluate the siamese on ``loader``.
-
-    threshold:
-      float — pin operating-point metrics (precision/recall/f1/fpr/fnr) at
-              this threshold.
-      "auto" — sweep all scores, pick the OVERALL ``best_f1_threshold`` and
-              re-bucket every per-source / per-k slice at that single value.
-              This is the operating-point metric the user wants reported for
-              the val-pinned F1 / precision / recall. ``best_f1_threshold``
-              is also returned as a field so the caller can persist it.
-
-    save_scores: when True, the per-bucket score + label arrays are returned
-                 under ``confusion_matrix`` so plots / audits can rebuild the
-                 ROC, PR curve, and confusion matrix at any threshold.
-    """
     model.eval()
     overall = _empty_bucket()
     per_source: dict[str, dict[str, list]] = defaultdict(_empty_bucket)
@@ -410,7 +315,6 @@ def evaluate(
             print(f"  [{n_seen}/{n_batches_total or '?'}]  "
                   f"elapsed={elapsed:5.1f}s  rate={rate:.2f}b/s", flush=True)
 
-    # Resolve threshold. "auto" ⇒ overall best_f1_threshold.
     if isinstance(threshold, str):
         if threshold.lower() != "auto":
             raise ValueError(f"threshold must be float or 'auto', got {threshold!r}")

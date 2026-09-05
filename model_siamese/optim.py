@@ -1,4 +1,3 @@
-"""Per-stage optimizer + scheduler factory for the siamese."""
 
 from __future__ import annotations
 
@@ -6,7 +5,6 @@ import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from model_siamese.model import MultiShotSiamese
-
 
 def build_optimizer_for_stage(
     stage: str, model: MultiShotSiamese, cfg: dict,
@@ -43,7 +41,6 @@ def build_optimizer_for_stage(
 
     optimizer = torch.optim.AdamW(groups, betas=(0.9, 0.999))
     return optimizer, lora_params
-
 
 def build_scheduler(
     optimizer: torch.optim.Optimizer, *, total_steps: int, warmup_frac: float,

@@ -22,8 +22,6 @@ func NewHandlers(p *inference.Pipeline, s *storage.Store) *Handlers {
 	return &Handlers{pipeline: p, store: s}
 }
 
-// POST /api/categories/upload
-// Multipart fields: category_name (string), images[] (1–10 files)
 func (h *Handlers) UploadCategory(c *gin.Context) {
 	categoryName := c.PostForm("category_name")
 	if categoryName == "" {
@@ -67,8 +65,6 @@ func (h *Handlers) UploadCategory(c *gin.Context) {
 	})
 }
 
-// POST /api/query
-// Multipart fields: category_name, query_image, siamese_threshold (opt), localizer_abstain_threshold (opt)
 func (h *Handlers) Query(c *gin.Context) {
 	categoryName := c.PostForm("category_name")
 	if categoryName == "" {
@@ -120,7 +116,6 @@ func (h *Handlers) Query(c *gin.Context) {
 	})
 }
 
-// GET /api/categories
 func (h *Handlers) ListCategories(c *gin.Context) {
 	names, err := h.store.ListCategories()
 	if err != nil {
@@ -130,7 +125,6 @@ func (h *Handlers) ListCategories(c *gin.Context) {
 	c.JSON(http.StatusOK, names)
 }
 
-// GET /api/categories/:name/images
 func (h *Handlers) GetCategoryImages(c *gin.Context) {
 	name := c.Param("name")
 	urls, err := h.store.ListCategoryImageURLs(name)
@@ -140,8 +134,6 @@ func (h *Handlers) GetCategoryImages(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, urls)
 }
-
-// --- helpers ---
 
 func decodeFileHeaders(files []*multipart.FileHeader) ([]image.Image, error) {
 	imgs := make([]image.Image, 0, len(files))

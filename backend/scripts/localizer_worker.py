@@ -1,17 +1,4 @@
 #!/usr/bin/env python3
-"""
-Persistent localizer inference worker.
-
-Protocol (one JSON line in, one JSON line out, newline-delimited):
-  stdin  <- {"support_dir": "/path", "query_image": "/path/to/query.jpg"}
-  stdout -> {"x1": int, "y1": int, "x2": int, "y2": int,
-              "score": float, "bg_prob": float}
-          or {"error": "message"}
-
-Startup args:
-  --model      path to localizer.onnx
-  --device-id  CUDA device index (default 0)
-"""
 
 import argparse
 import json
@@ -26,7 +13,6 @@ import onnxruntime as ort
 IMG_SIZE = 768
 K_MAX = 10
 
-
 def letterbox(img: Image.Image, size: int = IMG_SIZE):
     orig_w, orig_h = img.size
     scale = size / max(orig_w, orig_h)
@@ -39,11 +25,9 @@ def letterbox(img: Image.Image, size: int = IMG_SIZE):
     canvas.paste(resized, (pad_left, pad_top))
     return canvas, scale, pad_left, pad_top
 
-
 def to_chw(img: Image.Image) -> np.ndarray:
-    arr = np.array(img, dtype=np.float32) / 255.0  # HWC [0,1]
-    return arr.transpose(2, 0, 1)  # CHW
-
+    arr = np.array(img, dtype=np.float32) / 255.0
+    return arr.transpose(2, 0, 1)
 
 def load_support_images(support_dir: str):
     exts = {".jpg", ".jpeg", ".png"}
@@ -53,7 +37,6 @@ def load_support_images(support_dir: str):
         if os.path.splitext(f)[1].lower() in exts
     )[:K_MAX]
     return [Image.open(p).convert("RGB") for p in paths]
-
 
 def run_inference(session: ort.InferenceSession, support_dir: str, query_path: str) -> dict:
     support_imgs = load_support_images(support_dir)
@@ -72,7 +55,7 @@ def run_inference(session: ort.InferenceSession, support_dir: str, query_path: s
         mask_data[0, i] = 1.0
 
     query_lb, scale, pad_left, pad_top = letterbox(query_img, IMG_SIZE)
-    query_data = to_chw(query_lb)[np.newaxis]  # [1, 3, 768, 768]
+    query_data = to_chw(query_lb)[np.newaxis]
 
     best_box, best_score, bg_prob = session.run(
         ["best_box", "best_score", "bg_prob"],
@@ -104,7 +87,6 @@ def run_inference(session: ort.InferenceSession, support_dir: str, query_path: s
         "bg_prob": float(bg_prob[0]),
     }
 
-
 def build_session(model_path: str, device_id: int) -> ort.InferenceSession:
     providers = [
         ("CUDAExecutionProvider", {"device_id": device_id}),
@@ -114,7 +96,6 @@ def build_session(model_path: str, device_id: int) -> ort.InferenceSession:
     active = session.get_providers()
     print(json.dumps({"status": "ready", "providers": active}), flush=True)
     return session
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -138,7 +119,6 @@ def main():
         except Exception as exc:
             result = {"error": str(exc)}
         print(json.dumps(result), flush=True)
-
 
 if __name__ == "__main__":
     main()

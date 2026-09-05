@@ -1,4 +1,3 @@
-"""Inner training loop for the siamese."""
 
 from __future__ import annotations
 
@@ -10,9 +9,7 @@ from torch.utils.data import DataLoader
 from model_siamese.loss import total_loss
 from model_siamese.model import MultiShotSiamese
 
-
 _RUNNING_KEYS = ("loss", "focal", "variance", "decorrelation", "grad_norm")
-
 
 def train_one_pass(
     *,
@@ -28,13 +25,6 @@ def train_one_pass(
     progress_every: int = 10,
     hard_neg_recorder: dict | None = None,
 ) -> dict[str, float]:
-    """Run one training pass.
-
-    Optional hard_neg_recorder dict (instance_id -> list[{"path": str}]) is
-    populated with negatives whose existence_prob > 0.5 (the model
-    incorrectly predicted "present"). The siamese trainer feeds this back
-    into the dataset's hard_neg_cache for the next epoch.
-    """
     model.train()
     if not any(p.requires_grad for p in model.dinov2.parameters()):
         try:
@@ -154,7 +144,6 @@ def train_one_pass(
                       f"rate={rate:.2f}b/s  loss={avg_loss:.4f}", flush=True)
 
     if n_batches > 0:
-        # All keys except ``grad_norm`` are per-batch averages.
         for k in running:
             if k == "grad_norm":
                 continue

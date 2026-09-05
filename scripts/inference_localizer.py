@@ -1,23 +1,3 @@
-"""Localizer-only inference.
-
-CLI:
-    python -m scripts.inference_localizer \\
-        --checkpoint checkpoints/localizer/L3/stage_complete.pt \\
-        --supports s1.jpg s2.jpg s3.jpg s4.jpg \\
-        --query    scene.jpg
-
-Public API:
-    run_localize(checkpoint, support_paths, query_path, *, img_size=768,
-                 device=None, out_root="inference/localizer", smoke=False,
-                 abstain_threshold=0.5, top_k=5)
-
-Outputs:
-    - ``result.json`` with the **top-K** highest-confidence boxes (each with
-      box + score + bg_prob + abstain decision), the global ``bg_prob`` for
-      the query, and an explicit ``abstain`` flag.
-    - ``result.png`` annotated with the top-1 box (red if abstained, green
-      otherwise) and a footer "abstain (bg=X.XX)" / "score=X.XX".
-"""
 
 from __future__ import annotations
 
@@ -35,7 +15,6 @@ from model_localizer.model import MultiShotLocalizer
 from model_shared.checkpoint import load_trainable_state
 from model_shared.dataset import _letterbox
 
-
 def _next_run_dir(out_root: Path) -> Path:
     out_root.mkdir(parents=True, exist_ok=True)
     n = 1
@@ -45,10 +24,8 @@ def _next_run_dir(out_root: Path) -> Path:
     p.mkdir()
     return p
 
-
 def _load_image(p: str | Path) -> Image.Image:
     return Image.open(p).convert("RGB")
-
 
 def _draw_bbox(img: Image.Image, bbox_xyxy: tuple[float, float, float, float],
                *, color=(0, 255, 0), thickness: int = 4,
@@ -62,7 +39,6 @@ def _draw_bbox(img: Image.Image, bbox_xyxy: tuple[float, float, float, float],
         draw.rectangle([x1, max(0, y1 - 28), x1 + 8 * len(caption), y1], fill=color)
         draw.text((x1 + 2, max(0, y1 - 24)), caption, fill=(0, 0, 0))
     return out
-
 
 def _build_model_from_ckpt(
     ckpt: dict, *, k_max: int, img_size: int,
@@ -87,7 +63,6 @@ def _build_model_from_ckpt(
     load_trainable_state(m, ckpt.get("state_dict", {}))
     return m
 
-
 def _unletterbox_box(
     cx: float, cy: float, w: float, h: float, *,
     img_size: int, scale: float, pad_left: int, pad_top: int,
@@ -106,7 +81,6 @@ def _unletterbox_box(
     x2_n = max(0.0, min(native_w, x2_n))
     y2_n = max(0.0, min(native_h, y2_n))
     return x1_n, y1_n, x2_n, y2_n
-
 
 @torch.no_grad()
 def run_localize(
@@ -164,8 +138,8 @@ def run_localize(
     qry_t = TF.to_tensor(qry_lb).unsqueeze(0).to(device_t)
 
     out = model(sup_t, mask, qry_t)
-    fg_logits = out["pred_logits_fg"][0]                                  # (P,)
-    bg_logit  = out["bg_logit"][0]                                        # ()
+    fg_logits = out["pred_logits_fg"][0]
+    bg_logit  = out["bg_logit"][0]
     joint = torch.cat([fg_logits, bg_logit.unsqueeze(0)], dim=-1)
     joint_prob = joint.softmax(dim=-1)
     fg_prob = joint_prob[:-1]
@@ -173,7 +147,7 @@ def run_localize(
 
     top_k_eff = max(1, min(int(top_k), fg_prob.numel()))
     top_vals, top_idx = fg_prob.topk(top_k_eff)
-    pred_boxes_q = out["pred_boxes"][0]                                   # (P, 4)
+    pred_boxes_q = out["pred_boxes"][0]
 
     candidates: list[dict[str, Any]] = []
     for rank, (val, idx) in enumerate(zip(top_vals.tolist(), top_idx.tolist())):
@@ -238,7 +212,6 @@ def run_localize(
           f"(abstain={abstain}, top1={best['score']:.3f}, bg={bg_prob:.3f})")
     return payload
 
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -260,7 +233,6 @@ def main() -> None:
         abstain_threshold=args.abstain_threshold,
         top_k=args.top_k,
     )
-
 
 if __name__ == "__main__":
     main()

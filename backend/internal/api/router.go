@@ -9,8 +9,6 @@ import (
 	"github.com/pewpewnor/looking-glass/backend/internal/storage"
 )
 
-// NewRouter creates and returns the configured Gin engine.
-// dataDir is used to serve stored category images as static files.
 func NewRouter(p *inference.Pipeline, s *storage.Store, dataDir string) *gin.Engine {
 	r := gin.Default()
 
@@ -21,7 +19,6 @@ func NewRouter(p *inference.Pipeline, s *storage.Store, dataDir string) *gin.Eng
 		AllowCredentials: false,
 	}))
 
-	// Serve saved support images: GET /images/categories/{cat}/{file}
 	r.Static("/images", dataDir)
 
 	h := NewHandlers(p, s)

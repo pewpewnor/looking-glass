@@ -1,8 +1,3 @@
-"""JSON analysis writers for both trainers.
-
-Uses fsync + retry semantics matching ``model_shared.checkpoint.atomic_save`` so
-that analysis JSONs are equally durable on Google Drive's FUSE mount.
-"""
 
 from __future__ import annotations
 
@@ -12,7 +7,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 def write_json(
     path: Path,
     payload: Any,
@@ -20,15 +14,6 @@ def write_json(
     max_retries: int = 3,
     retry_backoff_s: float = 1.0,
 ) -> None:
-    """Atomic, durable JSON write.
-
-    1. Write to <path>.tmp via a regular file handle.
-    2. flush() + os.fsync() to push bytes off the FUSE cache (Drive).
-    3. os.replace(tmp, path) to atomically rename.
-    4. fsync the parent directory (best-effort).
-
-    Retries on transient OSError up to ``max_retries`` times.
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     last_err: Exception | None = None
@@ -64,7 +49,6 @@ def write_json(
     if last_err is not None:
         raise last_err
 
-
 def flatten_metrics(d: Any, prefix: str = "") -> dict[str, float]:
     out: dict[str, float] = {}
     if isinstance(d, dict):
@@ -75,9 +59,7 @@ def flatten_metrics(d: Any, prefix: str = "") -> dict[str, float]:
         out[prefix] = float(d)
     return out
 
-
 def aggregate_folds(fold_jsons: list[dict]) -> dict:
-    """Recursive mean / min / max / std across folds for every numeric metric."""
     flat_per_fold = [flatten_metrics(j) for j in fold_jsons]
     keys: set[str] = set()
     for f in flat_per_fold:
@@ -98,9 +80,7 @@ def aggregate_folds(fold_jsons: list[dict]) -> dict:
         "metrics": metrics,
     }
 
-
 def update_summary(analysis_dir: Path, headline: dict[str, tuple[int, float]]) -> None:
-    """Rolling best-by-metric pointer at <analysis_dir>/summary.json."""
     summary_path = analysis_dir / "summary.json"
     if summary_path.exists():
         with open(summary_path) as f:

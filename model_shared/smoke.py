@@ -1,24 +1,3 @@
-"""End-to-end smoke test (~60s).
-
-Exercises every public function call exactly once on a tiny config:
-
-    1. aggregator validate
-    2. localizer Phase 0
-    3. localizer L1 / L2 / L3 (1 epoch × 1 fold × 4 episodes × img=224 × K_max=2)
-    4. localizer evaluate_run on each stage's checkpoint
-    5. siamese Phase 0
-    6. siamese S1 / S2 (1 epoch × 1 fold × 4 episodes × img=224 × K_max=2)
-    7. siamese evaluate_run on each stage's checkpoint
-    8. inference_combined run + threshold sweep
-    9. plots from smoke analysis JSONs
-   10. checkpoint save/load roundtrip determinism
-
-All artifacts go to ``checkpoints/_smoke/`` and ``model_analysis/_smoke/``,
-which are wiped (cleanup=True) at the end unless ``cleanup=False``.
-
-Pass ``smoke=True`` to any train_*/evaluate_* function to dial down
-to these tiny config values.
-"""
 
 from __future__ import annotations
 
@@ -27,10 +6,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 SMOKE_OUT_ROOT = "checkpoints/_smoke"
 SMOKE_ANALYSIS_ROOT = "model_analysis/_smoke"
-
 
 def _smoke_cfg(*, manifest: str, data_root: str | None) -> dict[str, Any]:
     return dict(
@@ -41,7 +18,6 @@ def _smoke_cfg(*, manifest: str, data_root: str | None) -> dict[str, Any]:
         smoke=True,
     )
 
-
 def smoke_test(
     *,
     seconds_budget: float = 60.0,
@@ -50,7 +26,6 @@ def smoke_test(
     cleanup: bool = True,
     verbose: bool = True,
 ) -> dict:
-    """Run the smoke pipeline. Returns a dict with timings + status."""
     import torch
 
     t_start = time.time()
@@ -62,7 +37,7 @@ def smoke_test(
         try:
             res = fn()
             status[name] = "ok"
-        except Exception as e:                                                     # noqa: BLE001
+        except Exception as e:
             elapsed = time.time() - t0
             timings[name] = elapsed
             status[name] = f"FAIL: {type(e).__name__}: {e}"
@@ -82,12 +57,10 @@ def smoke_test(
     from scripts.inference_combined import run_combined, sweep_threshold
     from model_shared.plots import plot_all_from_jsons
 
-    # 0. Aggregator validate (fast).
     _t("aggregator_validate", lambda: aggregator.validate(strict=True) or True)
 
     cfg = _smoke_cfg(manifest=manifest, data_root=data_root)
 
-    # 1. Localizer pipeline.
     _t("localizer_phase0", lambda: loc_train.evaluate_phase0(**cfg))
     l1 = _t("localizer_L1", lambda: loc_train.train_stage_L1(**cfg, resume=False))
     _t("localizer_eval_L1", lambda: loc_train.evaluate_run(
@@ -105,7 +78,6 @@ def smoke_test(
         **cfg,
     ))
 
-    # 2. Siamese pipeline.
     _t("siamese_phase0", lambda: sia_train.evaluate_phase0(**cfg))
     s1 = _t("siamese_S1", lambda: sia_train.train_stage_S1(**cfg, resume=False))
     _t("siamese_eval_S1", lambda: sia_train.evaluate_run(
@@ -118,7 +90,6 @@ def smoke_test(
         **cfg,
     ))
 
-    # 3. Combined inference: run on a single (supports, query) tuple from the manifest.
     import json as _json
     with open(manifest) as f:
         m = _json.load(f)
@@ -141,10 +112,8 @@ def smoke_test(
         smoke=True,
     ))
 
-    # 4. Plots.
     _t("plots", lambda: plot_all_from_jsons(SMOKE_ANALYSIS_ROOT) or True)
 
-    # 5. Checkpoint roundtrip determinism (localizer L3).
     def _roundtrip() -> bool:
         from model_localizer.model import MultiShotLocalizer
         from model_shared.checkpoint import load_trainable_state
@@ -177,7 +146,6 @@ def smoke_test(
         "timings": timings,
         "step_status": status,
     }
-
 
 if __name__ == "__main__":
     import argparse
