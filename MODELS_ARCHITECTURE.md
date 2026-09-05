@@ -109,7 +109,7 @@ directly.
 │   ├── inference_combined.py     # cascaded siamese → localizer + sweep_threshold
 │   └── export.py                 # ONNX / TFLite export
 ├── notebooks/modeling.ipynb      # two parallel training sections
-├── ARCHITECTURE.md               # this document
+├── MODELS_ARCHITECTURE.md        # this document
 ├── pyproject.toml / requirements.txt
 │
 ├── model_shared/                 # used by BOTH model packages
